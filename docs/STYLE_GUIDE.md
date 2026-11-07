@@ -232,8 +232,7 @@ if( n_u > 0 ) {
 
 ### 3.4 Braces always alone; no body on the control-flow line
 
-**Two mandatory rules** (2026-10-28, user ruling — they extend § 3.3 from
-`if`/`else` to *every* block):
+**Two mandatory rules** (they extend § 3.3 from `if`/`else` to *every* block):
 
 1. **Every brace that opens a block stands on its own line** — functions,
    `class` / `struct` / `namespace`, `if` / `else` / `for` / `while` /
@@ -279,7 +278,7 @@ namespace edge_mg {
 }
 ```
 
-**Lambdas** (2026-10-29 ruling) are exempt from the one-line ban: a lambda
+**Lambdas** are exempt from the one-line ban: a lambda
 definition is an *expression argument*, not a control-flow body, so it may
 be written on one line with **no length threshold of its own**.  But a
 lambda that needs more than one line follows rule 1 like any other block —
@@ -428,13 +427,11 @@ __device__ void assemble_cell
   f2_t ( & m1 )[ 12 ][ 12 ] );
 ```
 
-Why (measured, `docs/mhd/nonideal/compile-cost-analysis.md` § 3):
-`__forceinline__` copies the whole callee into every caller's device code.
-A 22-line kernel became **40,868 lines of PTX (1858×)** that way, and
-`nonideal` alone reached 10.85 MB / 400,063 lines of PTX.  Inlining a big
-function is therefore a *compile-time* decision with no runtime upside —
-this tree builds with `-rdc=true`, so a genuine `__device__` out-of-line
-call is available and cheap.
+Why: `__forceinline__` copies the whole callee into every caller's device
+code — a 22-line kernel has been measured to expand to tens of thousands of
+lines of PTX that way.  Inlining a big function is therefore a *compile-time*
+decision with no runtime upside: this tree builds with `-rdc=true`, so a
+genuine `__device__` out-of-line call is available and cheap.
 
 Rule of thumb for the boundary: if the function is big enough that you
 would hesitate to paste it three times, leave it out of line.
@@ -535,17 +532,12 @@ The 15-line threshold is the same one § 5.2 uses for `__forceinline__`
 and for the same reason: below it the body is shorter than its own
 signature plus the reader's trip to another file.
 
-**Why this is a rule and not taste.**  The `edge_mg` line carried
-1,277 lines of host bodies inside class bodies plus 928 lines of
-namespace-scope host definitions inside headers — 19% of its 11,750
-header lines (audit: `docs/mhd/nonideal/
-host-code-and-member-placement-audit.md`).  A header's cost is paid by
-every TU that includes it, and a body in a header is compiled once per
-TU while providing nothing a declaration does not: the pgen-facing
-`edge_mg_iface.h` advertised a 166-line interface but dragged a
-3,088-line include closure behind it.  The rest of the tree already
-works this way (278 `class::method` definitions across the 48 `.cpp`
-under `src/`).
+**Why this is a rule and not taste.**  A header's cost is paid by every
+translation unit that includes it, and a body in a header is compiled once per
+TU while providing nothing a declaration does not.  An interface header that
+carries its implementation behind it also hides the real dependency from the
+reader: what looked like a compact interface dragged thousands of lines of
+include closure behind it.  The rest of the tree already works this way.
 
 Exceptions: none.  If a host body is really needed in a header — it is
 not known how to today — it belongs in the template bucket (§ 6.3.3),
@@ -637,17 +629,19 @@ int n_vu = 5000;      //  1-D log Voigt table size
 
 - No multi-line derivation / design narrative in code.  A comment
   block longer than ~4 lines that explains *why a design is the way
-  it is* belongs in `docs/` (a method document);  the code keeps ONE
-  short comment with a pointer to it:
+  it is* belongs in the documentation;  the code keeps ONE short
+  comment stating the property the code relies on:
 
 ```cpp
-//  The boundary rows close through the given face flux
-//  ( conservation proof:  docs/methods/fld-method.md § 3 ).
+//  The boundary rows close through the given face flux, so the
+//  row sum telescopes to 1 + sig.
 ```
 
-  The code near the comment must stay readable on its own;  the
-  document carries the math, the alternatives tried, and the
-  history.
+  **Documents cite code, by symbol name;  code never cites documents.**
+  A comment that points at a file name, a section number, a date or a test
+  rots as soon as the document moves, and a reader of the code cannot follow
+  it.  The math, the alternatives that were tried and the history belong to
+  the document, which finds the code by name.
 
 ---
 
@@ -704,7 +698,7 @@ derived types plus one common base -- not one type with an `if` inside.  The pol
 is copied **by value** into the kernel, hence it must stay trivially copyable:  scalars
 only, with every pointer and buffer in a POD view struct that is itself trivially copyable.
 The full convention,  with the canonical files to copy from,  is in
-`docs/AGENTS.md` § "Device dispatch convention (no runtime type resolution on the device)".
+`AGENTS.md` § "Device dispatch convention (no runtime type resolution on the device)".
 
 ### 13.3 Deep indentation
 

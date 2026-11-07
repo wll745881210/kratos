@@ -1,781 +1,382 @@
-# README-USER.md — Kratos User Guide
+# Kratos user guide
 
-> Covers the framework architecture, module design and interactions, and step-by-step guidance
-> for composing problem generators of varying complexity, using four real projects as reference.
+Kratos is a multi-physics astrophysical simulation framework for heterogeneous computing devices:
+compressible hydrodynamics and magnetohydrodynamics, non-equilibrium thermochemistry, radiation
+transport, self-gravity and tracer particles on block-structured adaptive meshes. The code is C++17,
+with optional CUDA, HIP or MUSA backends and optional MPI.
 
----
+The framework is compositional. The trunk supplies algorithms; a problem generator (pgen) chooses
+which of them a binary contains. A binary that enrolls only hydrodynamics is a hydrodynamics code;
+one that enrolls only the radiation modules is a radiative-transfer code. The module set is fixed at
+compile time. The contributor contract is `AGENTS.md` at the repository root.
 
-## 1. Overall Framework and Infrastructures
+## 1. Framework
 
-### 1.1 What Kratos Is
+### 1.1 Layers
 
-Kratos is a multi-physics astrophysical simulation framework designed for heterogeneous
-computing devices (GPUs). It is built directly on GPU programming models (CUDA/HIP) without
-intermediate portability layers, achieving zero-overhead abstraction while targeting multiple
-backends. The framework is self-contained — no third-party libraries beyond MPI and the C++17
-standard library.
-
-**Published method paper:** Wang (2025), *ApJS*, 277:63.
-
-### 1.2 Architecture at a Glance
-
-```
-┌─────────────────────────────────────────────────┐
-│                  prob::run()                     │  ← You write this
-│  Creates mesh, enrolls modules, reads params    │
-└─────────────────────┬───────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────┐
-│               mesh::mesh_t                       │  ← Central orchestrator
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
-│  │ p_dev    │ │ p_com    │ │ p_cyc            │ │  ← Infrastructure
-│  │ (GPU)    │ │ (MPI)    │ │ (timestepping)   │ │
-│  ├──────────┤ ├──────────┤ ├──────────────────┤ │
-│  │ p_mgn    │ │ p_bio    │ │ p_tre (oct-tree) │ │  ← Mesh & I/O
-│  │ (grid)   │ │ (snapshots)│                  │ │
-│  ├──────────┤ └──────────┘ └──────────────────┘ │
-│  │ mods[]   │                                    │  ← Physics container
-│  │ (hydro, chemistry, multigrid, particle)      │
-│  └──────────┘                                    │
-└─────────────────────────────────────────────────┘
-```
-
-The mesh knows **only** about geometry — it has no awareness of which physics modules are
-enrolled. Modules extract geometry from the mesh unidirectionally. This separation is the
-foundation of Kratos's flexibility (Wang 2025a, §2.4).
-
-### 1.3 Infrastructure Layers
-
-| Layer | Class | Your Role |
-|-------|-------|-----------|
-| **Device** | `device::base_t` → `device_t` (CUDA/HIP/MUSA) | Enroll via `mesh.enroll_device<device_t>()` |
-| **Communication** | `comm::base_t` → `comm::mpi_t` | Enroll via `mesh.enroll_comm<comm::mpi_t>()` (MPI builds only) |
-| **Snapshot I/O** | `binary_io::base_t` → `binary_io::mpi_t` | Enroll via `mesh.enroll_binary_io<binary_io::mpi_t>()` |
-| **Time cycle** | `cycle::base_t` | Enroll via `mesh.enroll_cycle<MyCycle>()`; override for custom output |
-| **Mesh generator** | `meshgen::base_t` → `cartesian_t`, `spherical_t`, `cylindrical_t` | Enroll via `mesh.enroll_mgen<MyMgen>()` |
-| **Physics modules** | `mod_base_t` → your subclasses | Enroll via `mesh.enroll_module<MyModule>(init_order, step_order)` |
-
-### 1.4 Configuration File Format
-
-INI-like format. Sections are `[section]` headers, followed by `key = value` lines:
-
-```ini
-[mesh]
-x_min         = -1.0
-x_max         =  1.0
-n_cell_global =  128
-
-[dynamics]
-gamma         = 1.6667
-
-[cycle]
-dt_output     = 0.01
-t_lim         = 1.0
-
-[prob]
-rho0          = 1.0
-prob|pre0         1.0
-```
-
-Internally, the `input` class stores entries as `section|key` → value pairs, so
-programmatic access uses `args.get<T>("section", "key")`. Lines starting with `#` are
-comments.
-
-Usage: `bin/kratos my_problem.par [override.par ...]`
-
-Later files override earlier ones. In MPI mode, only root reads; all parameters are broadcast.
-
-### 1.5 Index Conventions
-
-Hydrodynamic variable indices are always qualified with `idx::` to distinguish them
-from arbitrary array offsets:
-
-```cpp
-u[ idx::rho ]       // mass density
-u[ idx::ene ]       // total energy density
-u[ idx::mom + a ]   // momentum density (a = 0,1,2)
-```
-
-This convention is used throughout Kratos and is expected in all problem generators.
-
----
-
-## 2. Design Ideas: Modules and Interactions
-
-### 2.1 The Module Lifecycle
-
-Every physics module inherits from `mesh::mod_base_t` and follows this contract:
-
-```
-read()    →  Called first. Parse your parameters from the input file.
-              Register block data factories.
-              Call your enroll<...>() method.
-
-init()    →  Called after all reads complete. Allocate memory.
-              Configure sub-modules.
-              Access geometry from the now-built mesh.
-
-step()    →  Called every cycle. Implement your physics.
-              Iterate local blocks, launch kernels, exchange boundaries.
-
-finalize() →  Called at teardown. Free resources, print diagnostics.
-```
-
-### 2.2 Enrollment: The Compile-Time Composition Pattern
-
-Modules do not use runtime virtual dispatch for physics sub-components. Instead, they use
-template-based enrollment with CRTP (Curiously Recursive Template Pattern). The rationale
-is documented in Wang (2025a, §2.4): virtual function tables on GPUs cause _"significant
-performance degradation by ~10² times"_ due to global memory latency.
-
-Each module exposes an `enroll<>()` template that wires sub-modules together:
-
-```cpp
-// Hydro module example:
-template< class prx_T, class itg_T, class eos_T,
-          class rec_T, class rie_T, class com_T >
-void enroll();
-```
-
-At compile time, the template parameters select concrete implementations (e.g., RK2 integrator,
-adiabatic EOS, PLM reconstructor, HLLC Riemann solver), and a lambda-based integration
-pipeline is assembled: `cons2prim → act_bnd → calc_flx → act_flx → intg_flx`.
-
-### 2.3 Block Data and Proxies
-
-Each module stores per-block physics data in a `block_data_t` inheriting from
-`mesh::block::base_data_t`. Access follows a three-layer model:
-
-```
-block_t                → Metadata: id, rank, region, geometry
-base_data_t (h/d)      → Physics fields: dat_3d_t<T> arrays
-dual_t                 → Wraps block_t + host copy + device copy + stream/event
-```
-
-A **proxy struct** provides typed access:
-
-```cpp
-struct my_proxy_t : mesh::block::proxy_t< my_block_data_t > {
-    using bdt_t = my_block_data_t;
-    static my_block_data_t & ref( base_data_t & bd ) {
-        return dynamic_cast< my_block_data_t & >( bd );
-    }
-};
-```
-
-### 2.4 Cross-Module Data Sharing
-
-When Module B needs data from Module A (e.g., chemistry reads hydro density), Kratos uses
-a **shallow-copy proxy** pattern (Wang 2025a, §2.4, Figure 2):
-
-1. Module A stores a `weak_ptr` to itself in a static proxy member (`prx_base_t::p_hyd`)
-2. Module B's proxy struct includes both modules' block data types
-3. Before each GPU kernel launch, the proxy constructs a temporary `bdt_T` that
-   **shallow-copies pointers** from Module A's data (no GPU copies)
-4. The kernel sees a unified data structure
-
-```cpp
-// Simplified proxy for hydro + multigrid coupling:
-struct prx_hyd_t : prx_base_t, mesh::block::proxy_t< hydro::block_data_t > {
-    struct bdt_hyd_t : hydro::block_data_t {
-        multigrid::data::base_t mgd;  // shallow-copied from MG module
-    };
-    static auto d( const bdt_T & bdt ) {
-        return bdt_hyd_t( bdt );  // constructor shallow-copies mgd
-    }
-};
-```
-
-### 2.5 Parasite Pattern
-
-Modules that operate on another module's data use the **parasite pattern**:
-
-```cpp
-auto p = mesh.enroll_module< hydro_t >( 0, 0 );
-auto q = mesh.enroll_module< chem_t >( 1, 2 );
-q->parasite( p );  // chemistry depends on hydro data
-```
-
-The parasite stores a `weak_ptr` to the host. It accesses host data via the proxy's static
-accessors, which `dynamic_cast` to the concrete type through the weak pointer.
-
-### 2.6 Module Execution Order
-
-`mesh.enroll_module<T>(init_order, step_order)` controls the initialization and per-cycle
-execution sequence. Common ordering:
-
-| Order | Module | Rationale |
-|-------|--------|-----------|
-| 0 | Hydro | Primary physics |
-| 1 | Multigrid | Must run after hydro (needs density for source), before hydro step applies gravity |
-| 2 | Chemistry | After hydro (parasite, updates species) |
-| 3 | Particles/Radiation | After chemistry (photon sources depend on species) |
-
----
-
-## 3. Composing a Problem Generator
-
-### 3.1 Minimal Example: 92-line Shock Tube
-
-The simplest possible problem is `usr_ext/std_tst/sod/usr.cpp` (92 lines). It:
-
-1. Subclasses `dynamics::hydro_t`
-2. Overrides `read()` to parse `[prob]` parameters and call `enroll<>()`
-3. Overrides `init_cond()` to set the left/right Riemann states
-4. Defines `prob::run()` to enroll device + comm + module, init, evolve
-
-This is the reference for all hydro-only problems. See it at `usr_ext/std_tst/sod/usr.cpp`.
-
-### 3.2 Example A: `usr_ext/kh_gas` — Intermediate Complexity
-
-**Physics:** Kelvin-Helmholtz instability with self-gravity and radiative cooling.
-
-**What it demonstrates:**
-- Custom integrator (`stp_t`) with gravity and cooling source terms
-- Cross-module proxy: hydro accesses multigrid potential
-- Custom multigrid module with conditional enable/disable
-- Unit system for CGS<->code conversion
-
-#### Structure
-
-```
-usr_ext/kh_gas/
-  usr.cpp          # All classes in one file (514 lines)
-```
-
-#### Key design decisions
-
-**Custom integrator (`stp_t<>`):** The CRTP-derived integrator overrides `add_flux()` to inject
-gravitational acceleration and cooling energy loss into the hydro update. The gravity potential
-comes from the multigrid module via the cross-module proxy (`prx_hyd_t`).
-
-```cpp
-// In add_flux(): compute gravity from MG potential
-auto d_fld = b_d.mgd.fld( i );     // MG potential from proxy
-...
-acc[ a ] = -d_fld / d_x;            // central difference gradient
-u[ idx::mom + a ] += acc[ a ] * dt_rho;  // momentum update
-
-// Apply cooling
-self.cool_e( eg, rho, rho_div, b_d, f_eos );
-```
-
-**Proxy (`prx_hyd_t`):** Extends both `prx_base_t` (cross-module weak_ptr) and
-`mesh::block::proxy_t<hydro::block_data_t>`. Defines a composite `bdt_hyd_t` that
-shallow-copies the `mgd` (multigrid data) member alongside hydro fields.
-
-**Multigrid (`mg_t`):** Conditionally enabled via `grav_conv` parameter. If gravity
-is disabled (`grav_conv <= 0`), `step()` is a no-op — the simulation runs pure hydro.
-
-**Cooling (`cool_t`):** Implements a backward-Euler solver for optically-thin radiative
-cooling with escape probability correction. Cooling data is loaded from a file; if loading
-fails, cooling silently disables.
-
-**How `prob::run()` wires it:**
-
-```cpp
-mesh.enroll_device< device_t >();
-mesh.enroll_comm  < comm::mpi_t >();
-mesh.enroll_binary_io< binary_io::mpi_t >();
-mesh.enroll_module< hydro_t >();    // enrolled first
-mesh.enroll_module< mg_t >();       // enrolled second; cross-linked via proxy
-```
-
-#### What to learn from this example
-
-1. **Custom integrator via CRTP:** inherit from `rk2_t<derived_T>`, override `add_flux()`.
-   The device-side kernel recovers your concrete type via `get_self()`.
-
-2. **Cross-module data:** define a composite proxy struct. The `d()` method constructs a
-   temporary block data that shallow-copies fields from multiple modules. The kernel sees
-   a unified view.
-
-3. **Unit conversion:** use `phys::unit_t` to convert between code units and CGS.
-   The integrator reads parameters in physical units and converts.
-
-4. **Optional physics:** if a parameter is zero/negative, skip the computation in `step()`.
-
----
-
-### 3.3 Example B: `usr_ext/bin_bh` — Compact with Custom Physics
-
-**Physics:** Binary star system with sink particles and stellar outflows, orbiting in a
-shearing box. Self-gravity from the binary is computed analytically (not via multigrid).
-
-**What it demonstrates:**
-- Custom cycle with per-timestep hooks and statistics output
-- Analytic gravity source (point masses on circular orbits)
-- Sink particle treatment (mass removal near stars)
-- Stellar outflow boundary condition
-- Shortest `prob::run()` in the codebase (38 lines)
-
-#### Structure
-
-```
-usr_ext/bin_bh/
-  bin_bh_test.par     # Parameter file
-  usr.cpp              # Minimal orchestrator (38 lines)
-  hydro/
-    cycle.h            # Custom cycle with gravity stats
-    hydro.h            # Custom hydro module
-    intg.h             # Integrator with analytic gravity
-    grav_src.h         # star_t and bin_star_t classes
-    boundary.h         # Inflow boundary condition
-```
-
-#### Key design decisions
-
-**Separation of concerns in subdirectories:** The 38-line `usr.cpp` only enrolls modules.
-All physics logic is in `hydro/` subdirectories — a clean pattern for complex projects.
-
-**Custom cycle (`cycle_t`):** The cycle exposes `std::function` hooks (`f_pre`, `f_acc`,
-`f_out`) that the integrator wires up during `init()`. This is a callback-based approach:
-the cycle owns the output logic, the integrator provides the data.
-
-```cpp
-// In stp_t::init():
-cyc.f_pre = [ & ] ( const bool & stat_grav ) { this->stat_grav = stat_grav; };
-cyc.f_acc = [ & ] ( ) {
-    mod.p_dev->cp( p_grav_h, p_grav, 6 );    // D→H copy
-    mod.p_mesh->p_com->reduce_all( p_grav_h, comm::sum, 6 );  // MPI reduce
-    // Print or store gravitational acceleration
-};
-```
-
-**Analytic gravity in the integrator:** `bin_star_t` contains two `star_t` objects, each
-with position updated via `φ = ω·t`. The `f_grav()` method computes `1/r²` acceleration
-with a Plummer softening length. Particles inside `r_sink` have their momentum and energy
-halved (sink treatment). Outflow stars set the cell state to a prescribed wind profile.
-
-**Custom boundary condition (`inflow_t`):** Inherits from
-`dynamics::hydro::boundary::phys_base_t<prx_T, inflow_t<prx_T>>` (CRTP). The `hydro()`
-device method sets ρ, p, v in ghost cells.
-
-```cpp
-template< class d1d_T, class bdt_T >
-__forceinline__ __device__ void hydro
-( d1d_T & d, int i_3d[], bdt_T & b_d ) const {
-    for( int i = -d.n_spa/2; i < 0; ++i ) {
-        d( i, idx::rho ) = rho;
-        d( i, idx::ene ) = pre;
-        for( int a = 0; a < 3; ++a )
-            d( i, idx::mom + a ) = vel[a];
-    }
-}
-```
-
-**How `prob::run()` wires it:**
-
-```cpp
-mesh.enroll_device< device_t >();
-mesh.enroll_comm  < comm::mpi_t >();
-mesh.enroll_binary_io< binary_io::mpi_t >();
-mesh.enroll_cycle     < friction::cycle_t >();    // custom cycle
-mesh.enroll_module    < friction::hydro_t >();    // custom hydro (enrolls the rest)
-```
-
-#### What to learn from this example
-
-1. **Custom cycle with callback hooks:** expose `std::function` members, wire them during
-   `init()`. Keeps cycle logic separated from integrator logic.
-
-2. **Analytic gravity sources:** compute gravity directly on the GPU in `add_flux()`.
-   No multigrid enrollment needed — simpler and faster for point masses.
-
-3. **Sink particles:** modify cell state inside `add_flux()` when a cell center lies within
-   `r_sink_2`. The integrator has full access to `u[]`.
-
-4. **Modular file layout:** physics classes in `hydro/`, thin orchestrator in `usr.cpp`.
-   This pattern scales to dozens of files cleanly.
-
-5. **`#warning` for TODO markers:** `#warning "TODO: Full 3D selection of the omega
-   direction"` — the code compiles but the comment flags incomplete work.
-
----
-
-### 3.4 Example C: `usr_ext/planet_atm_sph` — Complex Multi-Module
-
-**Physics:** Exoplanetary atmosphere in spherical-polar coordinates with:
-- 3D hydrodynamics with planetary + stellar gravity and rotation
-- Non-equilibrium thermochemistry with radiative cooling
-- Ray-tracing ionizing radiation from the host star
-- Spherical boundary conditions (inflow wind, outflow, polar)
-
-**What it demonstrates:**
-- Four cooperating modules (hydro, chemistry, radiation, custom cycle)
-- Parasite pattern linking modules together
-- Custom EOS with non-ideal heat capacity
-- Spherical mesh generator, dedicated spherical integrator
-- Pole rebinning (coarsening cells near θ=0,π)
-- Full extension stack: `usr/extension/radiation/`, `usr/extension/hydro/`, `usr/extension/chem_therm/`
-
-#### Structure
-
-```
-usr_ext/planet_atm_sph/
-  usr.cpp            # Orchestrator: enrolls 4 modules + cycle + spherical meshgen (63 lines)
-  cycle.h            # Custom cycle: hydro_off mode, error aggregation
-  hydro.h            # Hydro with chemical species, spherical initial conditions
-  intg.h             # Spherical integrator with stellar+planetary gravity, Coriolis, damping
-  eos.h              # EOS with non-ideal cv(T), spherical dt calculation, pole rebinning
-  chemistry.h        # Chemistry module: conditionally active after t_micro_start
-  radiation.h        # Radiation module with pole rebinning, photon generation
-  boundary.h         # Four custom boundary conditions (sph_out, sph_ref, sph_pol, inflow)
-  pole_rebin.h       # Pole rebinning utility (coarsens cells near poles)
-```
-
-#### Key design decisions
-
-**Module cross-linking in `prob::run()`:**
-
-```cpp
-auto p = mesh.enroll_module< hydro_t >( 0, 0 );      // hydro first
-auto r = mesh.enroll_module< radiation_t >( 2, 1 );    // radiation second
-auto q = mesh.enroll_module< chem_t >( 1, 2 );         // chemistry third
-
-q->parasite( p );       // chemistry reads hydro data
-r->p_che   = q;         // radiation reads chemistry data
-r->p_hyd   = p;         // radiation reads hydro data
-q->p_rad   = r;         // chemistry reads radiation data
-```
-
-This creates a **fully connected graph**: hydro ↔ chemistry ↔ radiation. The `p_che`,
-`p_hyd`, `p_rad` members are raw `shared_ptr`s while `q_mod` (the parasite's host link)
-is a `weak_ptr`.
-
-**Custom EOS (`eos_t`):** Uses `chemistry::hydro::cv_poly_list_t` for non-ideal
-heat capacity (polynomial in ln T). The `dt()` method computes the CFL timestep in
-spherical coordinates, accounting for the pole rebinning factor.
-
-```cpp
-auto dx = b_d.geo.dx_f( a, i )
-    * ( a >= 1 ? x[0] : 1 )          // radius scaling for angular directions
-    * ( a == 2 ? sin(x[1]) : 1 )     // sin(θ) for φ direction
-    * ( a == 2 ? rebin.num_rebin(b_d.geo, i) : 1 );  // pole rebinning
-```
-
-**Spherical integrator (`stp_t`):** Extends `dynamics::hydro::integrator::sph_t<>` with:
-
-1. **Planetary gravity:** `-GM_p / r²` radial acceleration
-2. **Stellar gravity in the rotating frame:** point-mass acceleration from a
-   companion star on a fixed circular orbit, plus centrifugal and Coriolis terms
-3. **Velocity damping:** all velocity components multiplied by `f_damp < 1` before
-   `t_micro_start` (allows hydrostatic relaxation before turning on microphysics)
-
-The velocity transformation between spherical `(r,θ,φ)` and Cartesian `(x,y,z)` is
-done on-device for every cell.
-
-**Conditional microphysics:** Both `chem_t` and `radiation_t` check `t > t_start`:
-
-```cpp
-// In chem_t::step():
-if( mesh.p_cyc->t > t_start )
-    extension::chem_t::step( mesh );
-// else: no-op. Pure hydro until microphysics activates.
-```
-
-This allows the simulation to first reach hydrostatic equilibrium before turning on
-chemistry and radiation.
-
-**Custom cycle (`cycle_t`):** Supports `hydro_off` mode (chemistry-only testing) by
-skipping the CFL-limited dt and using a fixed timestep. Also implements cross-rank
-error aggregation: if any rank throws an exception during `step()`, the MPI reduce
-propagates the error and the simulation stops cleanly.
-
-**Custom boundary conditions (4 types):**
-- `sph_out_t`: outflow with power-law extrapolation for density/temperature
-- `sph_ref_t`: reflecting boundary in spherical coordinates
-- `sph_pol_t`: special treatment for polar axis (θ=0,π)
-- `inflow_t`: stellar wind injection with species-dependent composition
-
-**Pole rebinning:** The `rebin_t` utility merges fine cells near θ=0 and θ=π to avoid
-extremely small azimuthal cell sizes that would force a tiny CFL timestep. Applied to
-both hydro fields and radiation fields.
-
-#### What to learn from this example
-
-1. **Multi-module coupling:** use `parasite()` for weak ownership, raw `shared_ptr`
-   members for strong ownership when modules truly require each other.
-
-2. **Extension stack:** build on `usr/extension/hydro/`, `usr/extension/chem_therm/`,
-   `usr/extension/radiation/` — they provide the proxy infrastructure and base
-   implementations that your problem customizes.
-
-3. **Spherical geometry:** requires a spherical meshgen (`mesh::meshgen::sph_t`),
-   a spherical integrator (`dynamics::hydro::integrator::sph_t`), and careful
-   handling of geometric source terms.
-
-4. **Conditional physics:** use `t_micro_start` to delay expensive microphysics
-   until the hydro has relaxed. Check `t > t_start` in `step()`.
-
-5. **Custom EOS:** inherit from `chemistry::hydro::eos_t<cv_model, derived_t>` (CRTP).
-   The non-ideal heat capacity is handled by the `cv_poly_list_t` model; the EOS
-   override handles spherical dt calculation and pole rebinning.
-
-6. **Pole rebinning:** a registry pattern where utilities apply to multiple modules
-   via a `get_data_fld()` template — the rebinner queries the block data for a
-   field reference, coarsens, and updates.
-
----
-
-### 3.5 Example D: `usr_ext/cosmic` — Custom Mesh and Scaling
-
-**Physics:** Cosmological simulation with:
-- Comoving coordinates with scale factor evolution
-- Dark matter particles (CIC deposition)
-- Self-gravity (multigrid Poisson solver)
-- Hydrodynamics with cosmic expansion source terms
-- Custom binary I/O format
-
-**What it demonstrates:**
-- Subclassing `mesh_t` itself (`cosmic::mesh_t`)
-- Custom binary I/O class
-- Cosmological scaling factors via a global singleton
-- Three-module enrollment with non-standard ordering
-- Custom mesh initialization
-
-#### Structure
-
-```
-usr_ext/cosmic/
-  usr.cpp              # Orchestrator: enrolls custom mesh, 3 modules, custom cycle
-  mesh.h / mesh.cpp    # cosmic::mesh_t extends mesh::mesh_t
-  binary_io.h          # cosmic::binary_io_t extends binary_io::base_t
-  indices.h            # Extended field indices
-  cosmology/
-    scaling.h          # Global singleton for scale factor a(t), Hubble, etc.
-    cycle.h            # Custom cycle for cosmic time
-  hydro/               # Hydro with comoving source terms
-  multigrid/           # Multigrid Poisson in comoving coordinates
-  particle/            # Dark matter particles
-  io/                  # Additional I/O utilities
-  types/               # Cosmology-specific types
-```
-
-#### Key design decisions
-
-**Custom mesh (`cosmic::mesh_t`):** Extends `mesh::mesh_t` — the only example in the
-codebase that subclasses the central orchestrator. This provides hooks for cosmological
-initialization that need to happen at the mesh level.
-
-**Global scaling singleton (`cosmic::scaling`):** A global interface accessed via
-`cosmic::scaling::interface().read(args)`. Provides `a(t)`, `da/dt`, `H(t)`, and
-conversion between comoving and physical coordinates. This is read before `mesh.init()`
-so that all modules can query scale factors during their own `init()`.
-
-**Non-standard module ordering:**
-
-```cpp
-mesh.enroll_module< hydro_t >( 1, 0 );     // Hydro first in step order
-mesh.enroll_module< cic_t   >( 2, 1 );     // Particles second
-mesh.enroll_module< mg_t    >( 0, 2 );     // Gravity third in step order
-```
-
-Note `mg_t` has `step_order=2` but `init_order=0` — it initializes first (to set up the
-multigrid hierarchy) but steps last (after particles have deposited density, which must
-appear as source for gravity at the *next* step).
-
-**Custom binary I/O:** `cosmic::binary_io_t` extends `binary_io::base_t` — stores
-cosmological metadata alongside snapshot data.
-
-#### What to learn from this example
-
-1. **Custom mesh subclass:** when initialization requires non-standard control flow,
-   subclass `mesh_t`. This is rare — most problems use the default `mesh_t`.
-
-2. **Global singleton for universal parameters:** `cosmic::scaling` provides `a(t)`,
-   `H(t)`, etc., to all modules without explicit parameter passing. Modules call
-   `cosmic::scaling::interface().get_a(t)` on-device via `__constant__` memory.
-
-3. **Module ordering matters:** `init_order` and `step_order` can differ. MG
-   initializes first but steps last, because particle density is needed for the
-   gravity source.
-
-4. **Custom I/O:** extend `binary_io::base_t` when snapshots need extra metadata
-   (e.g., scale factor, redshift).
-
----
-
-## 4. Module Customization Reference
-
-### 4.1 Which class to override for what
-
-| You want to... | Inherit from | Override |
+| layer | type | responsibility |
 |---|---|---|
-| Add a new physics module | `mesh::mod_base_t` | `read()`, `init()`, `step()`, `finalize()`, `init_cond()` |
-| Customize the EOS | `dynamics::eos::base_t` (CRTP) | `c2p_kernel()` |
-| Change integrator source terms | `rk2_t<>` or `sph_t<>` (CRTP) | `add_flux()` |
-| New Riemann solver | `dynamics::riemann::base_t` (CRTP) | flux computation |
-| New reconstructor | `dynamics::reconstruct::base_t` (CRTP) | face state reconstruction |
-| Custom boundary condition | `dynamics::hydro::boundary::phys_base_t` (CRTP) | `hydro()` GPU kernel |
-| Change timestep/output behavior | `cycle::base_t` | `init()`, `step()`, `redc_dt_start/finish()` |
-| Non-Cartesian geometry | `meshgen::base_t` → `spherical_t`, `cylindrical_t` | `set_coord_axes()`, `volume()`, `surface()` |
-| Cross-module data access | `extension::prx_base_t` + your proxy | `d()`, `set_module()` |
+| device | `device::base_t` | memory, streams, kernel launch; `device_t` is the backend alias |
+| communication | `comm::base_t` | rank, reductions, ghost exchange; MPI or serial |
+| mesh | `mesh::mesh_t` | blocks, refinement tree, geometry, module registry |
+| grid | `meshgen::base_t` | `[mesh]` keys, tree, coordinates, load balancing |
+| time loop | `cycle::base_t` | time step, CFL reduction, snapshots |
+| snapshot I/O | `binary_io::base_t` | the binary snapshot format |
+| physics | `mesh::mod_base_t` | per-block data and its updates |
+| problem | `prob::run` | enrolls the layers above for one problem |
 
-### 4.2 Complexity tiers
+`mesh::mesh_t` holds geometry only and has no knowledge of which physics modules are enrolled. The
+infrastructure objects are enrolled explicitly or filled in by default; the device is required, and
+`meshgen::base_t` is the Cartesian generator with `cyl_t` and `sph_t` deriving from it.
 
-| Tier | Scope | Example | Lines of code |
-|------|-------|---------|---------------|
-| **Simple** | 1 module, no cross-module | `std_tst/sod` | ~90 |
-| **Intermediate** | 2 modules, 1 cross-module | `kh_gas` | ~510 |
-| **Compact advanced** | 1 module but complex physics | `bin_bh` | ~380 total, 38 in usr.cpp |
-| **Full multi-module** | 4+ modules, full cross-linking | `planet_atm_sph` | ~1,000+ across 9 files |
-| **Framework-level** | Custom mesh, I/O, global state | `cosmic` | ~500+ across 10+ files |
+### 1.2 Index conventions
 
----
+The state of a block is one array per cell; the hydrodynamic entries are qualified with `idx::`:
 
-## 5. Build and Run
+```cpp
+u[ idx::rho ]      // mass density
+u[ idx::ene ]      // total energy density
+u[ idx::mom + a ]  // momentum density along axis a = 0, 1, 2
+```
 
-The Makefile uses the `USRDIR` variable to select which problem generator (pgen) to
-compile. It defaults to `usr/` (which contains only the weak-symbol default stub),
-so you **must** specify the pgen directory:
+The qualification marks internal hydrodynamic indices rather than arbitrary offsets; the MHD state
+adds `idx::bcc` for the cell-centred field. Cells are indexed by a `type::idx_t` triple,
+`utils::loop( geo.n_ceff )` visits the cells of a block, and `geo.x_cc( i )` returns a cell centre.
+
+## 2. Modules
+
+A physics module derives from `mesh::mod_base_t` and overrides the parts of the life cycle it uses:
+
+| method | when it runs | what to do there |
+|---|---|---|
+| `read( args )` | once, before any module initializes | read parameter keys |
+| `init( args, mesh )` | once, after every `read` | allocate, build device state |
+| `init_cond( d )` | for each new block | fill the initial state of one block |
+| `step( mesh )` | once per time step | advance this module by the cycle's `dt` |
+| `sync_streams( mesh )` | after `step` | drain this module's streams |
+| `finalize( mesh )` | at exit | free device memory |
+
+`init_cond` runs on every block that appears, not only at `t_0`: the mesh calls it during `init` and
+again whenever refinement or a load-balance change creates a block. Read parameter keys in `read`,
+not in `step`: every module's `read` completes before any module's `init` starts.
+
+### 2.1 Compile-time composition
+
+A module's numerical choices are template parameters, not runtime flags. For hydrodynamics,
+`dynamics::hydro_t::enroll` fixes six policies: proxy, integrator, equation of state, reconstruction,
+Riemann solver and boundary communication. The defaults are second-order Runge-Kutta, ideal-gas
+equation of state, piecewise-linear reconstruction, an HLLC Riemann solver and hydro boundary
+exchange.
+
+A pgen that wants a different integrator derives from `dynamics::hydro_t` and passes its own policy
+to `enroll`, for example `enroll< dynamics::hydro::proxy_t, itg_T >`. The CRTP base in
+`dynamics::hydro::integrator` calls the derived object's device functions (`reconstruct`, `riemann`,
+`add_flux`, `flux_to_du`), so the policy is resolved at compile time. The equation of state follows
+the same pattern: derive from `dynamics::eos::interface_t< derived_T >` and supply the device
+functions `c2p`, `dt` and `n_hvar`.
+
+### 2.2 Block data and proxies
+
+Each block owns two copies of its state, one on the host and one on the device.
+`mesh::block::block_t` is the geometry: ids, owning rank, logical region, coordinates and
+neighbours. `mesh::block::dual_t` pairs the host and device payloads of one block with the stream and
+event used to move between them: `d.h()` is the host copy and `d.d()` the device copy. The payload
+type `mesh::block::base_data_t` is module-defined; a module derives its data type and its proxy
+through `enroll_bdk` and `enroll_dat`. The proxy adapts a generic block to that data:
+`proxy_t::ref( h )` casts the host payload, `proxy_t::d( bd )` builds the device view passed to
+kernels, and `set_module( mod )` lets a derived proxy publish the module. The default `ref` and `d`
+in `src/mesh/block/block_proxy.h` are identity casts.
+
+### 2.3 Cross-module sharing
+
+Modules often need another module's data: chemistry needs the hydro state, and a radiation module
+may need the particle pool. The extension proxy base `extension::prx_base_t` holds static weak
+pointers to the enrolled hydro, multigrid and particle modules, and a block-level accessor such as
+`d_hyd( reg )` returns the other module's device data for a region. Each module publishes itself in
+`set_module` with `p_hyd = weak_from_this()`, so no module owns another. Sharing is by pointer: a
+shared buffer is stored once per block, and a module that only reads it copies nothing. A module
+that derives a composite view (for example the chemistry hydro proxy, which adds radiation fields to
+the hydro block data) shallow-copies the base struct and the pointers at the start of the step.
+
+### 2.4 Parasite modules
+
+A module that needs no block data of its own can reuse another module's block map. `parasite( q )`
+adopts the block allocation of `q`, sets `need_update = false`, and records `q` as a weak pointer.
+Its `update` then does nothing, and its `finalize` leaves the shared allocation to the host module,
+so a correction or a diagnostic runs on the same decomposition without a second allocation.
+
+### 2.5 Execution order
+
+The phases run in a fixed order: every module's `read` in enrollment order; then comm, device, cycle
+and the grid generator, then module `init`s in ascending `i_init`; each step runs a grid update and
+then every module's `step` in ascending `i_step`; finalize runs in enrollment order.
+`enroll_module< T >()` gives a module the next free order, so modules run in enrollment order;
+`enroll_module< T >( i_init, i_step )` places one explicitly, and two modules must not share a slot.
+
+## 3. Problem generators
+
+A problem generator is a directory that defines `prob::run`. `src/main.cpp` throws if no parameter
+file is given and then calls `prob::run`; the default in `src/user/probgen.cpp` is a weak symbol that
+prints `Default run function is empty!`, so a binary is usable only when the pgen supplies a strong
+override. The shipped generators live in the separate `kratos_usrproj` repository; the example below
+is complete and self-contained. Its include paths are written for a generator directory three levels
+below the repository root (`usr_ext/std_tst/<pgen>/`), so `../../../src/...`; a generator one level
+higher, in `usr_ext/<pgen>/`, uses `../../src/...`.
+
+The generator derives from a module and fills in its hooks. This one starts from a uniform state:
+
+```cpp
+#include "../../../src/device/general.h"
+#include "../../../src/comm/mpi/mpi.h"
+#include "../../../src/mesh/mesh_enroll.h"
+#include "../../../src/modules/dynamics/hydro/hydro.h"
+#include "../../../src/types.h"
+#include "../../../src/user/probgen.h"
+#include "../../../src/utilities/mapping/loop.h"
+namespace prob
+{
+class hydro_t : public dynamics::hydro_t
+{
+    type::float_t rho, pre, vel, gam;
+
+    void read( const input & args ) override
+    {
+        rho = args.get< type::float_t >( "prob", "rho", 1.e0 );
+        pre = args.get< type::float_t >( "prob", "pre", 1.e0 );
+        vel = args.get< type::float_t >( "prob", "vel", 0.e0 );
+        gam = args.get< type::float_t >( "dynamics", "gamma", 1.667 );
+        dynamics::hydro_t::read( args );
+        return enroll<>(  );
+    }
+
+    void init_cond( mesh::block::dual_t & d ) override
+    {
+        using prx_t = dynamics::hydro::proxy_t;
+        const auto & b_h = prx_t::ref( d.h(  ) );
+        for( auto i : utils::loop( d.b_w.get(  ).geo.n_ceff ) )
+        {
+            auto * u = b_h.hyd.u.at( i );
+            u[ idx::rho ] = rho;
+            u[ idx::ene ] = pre / ( gam - 1 ) + rho * vel * vel / 2;
+            u[ idx::mom ] = rho * vel;
+            u[ idx::mom + 1 ] = u[ idx::mom + 2 ] = 0;
+        }
+    }
+};
+
+void run( int argc, char * argv[] )
+{
+    mesh::mesh_t mesh;
+    mesh.enroll_device< device_t >(  );
+#ifdef __MPI__
+    mesh.enroll_comm< comm::mpi_t >(  );
+    mesh.enroll_binary_io< binary_io::mpi_t >(  );
+#endif
+    mesh.enroll_module< hydro_t >(  );
+    input args;
+    args.set_comm( mesh.p_com );
+    cmd( argc, argv, args );
+    mesh.init( args );
+    return mesh.evolve(  );
+}
+}                       // namespace prob
+```
+
+`read` sets defaults, reads the pgen's `[prob]` keys and the `[dynamics] gamma` it needs for the
+initial state, then calls the base `read` to enroll the default schemes; other shared keys are read
+during initialization by the module that owns them. `init_cond` runs on the host for every new
+block, with `prx_t::ref( d.h() )` giving typed access to the host state and the entries of `u` the
+conserved variables. `run` enrolls the device, MPI communication and I/O when
+the build has MPI, and the module; `cmd` reads the command-line files, `mesh.init` creates the
+blocks, and `mesh.evolve` runs the cycle.
+
+### 3.1 Replacing a component
+
+| goal | base class | override |
+|---|---|---|
+| new physics | `mesh::mod_base_t` | block data, `read`, `init_cond`, `step` |
+| different hydro scheme | `dynamics::hydro_t` | the policies passed to `enroll` |
+| different equation of state | `dynamics::eos::interface_t< derived_T >` | device `c2p`, `dt`, `n_hvar` |
+| different grid geometry | `meshgen::base_t` | `geo_type`, `location`, `surface`, `volume` |
+| different time loop | `cycle::base_t` | `step`, `evolve` |
+| different snapshot format | `binary_io::base_t` | `open`, `save`, `load` |
+| new reaction rate form | `chemistry::reaction::std_t< derived_T >` | `rate_coef` |
+
+## 4. Build and run
+
+GNU Make is the only build system; the binary is `bin/kratos` and only one pgen is compiled per
+binary.
+
+| variable | default | options |
+|---|---|---|
+| `USRDIR` | `usr` | directory of the pgen to compile |
+| `ARCH` | `CUDA` | `CUDA`, `HIP`, `HIPCPU`, `MUSA` |
+| `DEBUG` | `0` | `1` adds `-g -O0`, `__GPU_DEBUG__`/`__CPU_DEBUG__` and `debug_macros.h` |
+| `MPI` | `0` | `1` links MPI and defines `__MPI__` |
+| `PRECISION` | `1` | `0` all float, `1` mixed, `2` all double |
 
 ```bash
-# Build with a specific pgen
-make USRDIR=usr_ext/std_tst/sod
-
-# Full build with custom options
-make USRDIR=usr_ext/bin_bh DEBUG=0 ARCH=CUDA MPI=1 PRECISION=1
-
-# Build with the new pgen cloned from bin_bh
-make USRDIR=usr_ext/bin_bh_tst
-
-# Run
-bin/kratos usr_ext/bin_bh/bin_bh_test.par [override1.par ...]
+make USRDIR=<pgen_dir> ARCH=CUDA MPI=1 PRECISION=2 -j12
+bin/kratos run.par
 ```
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `USRDIR` | `usr` | Problem generator directory (contains the `prob::run()` override) |
-| `ARCH` | `CUDA` | GPU backend: `CUDA`, `HIP`, `HIPCPU`, `MUSA` |
-| `DEBUG` | `0` | Debug mode (`1` = `-g -O0`, force-includes `debug_macros.h`) |
-| `MPI` | `0` | MPI support (`1` = links `-lmpi`) |
-| `PRECISION` | `1` | Floating-point precision (`0`=all float, `1`=mixed, `2`=all double) |
+Sources are discovered automatically from `src/`, `$(USRDIR)` and `$(EXTDIR)`; there are no source
+lists. `make clean` removes `obj/` and `bin/`, and `make remake` runs `clean` then `all`. Always
+`make clean` when switching `ARCH`. A binary without a pgen prints `Default run function is empty!`.
 
-Sources are auto-discovered from the `USRDIR` path recursively. Only one pgen can be
-compiled at a time — the binary always produces `bin/kratos`. See `AGENTS.md` for
-further build details.
+The command line accepts one or more parameter files; later files override earlier ones. A snapshot
+is written as `<prefix_output>_<5-digit index>.bin`, and `visual/hydro_data.py` reads it back with
+`get_dd()` and `get_last_dd()`.
 
----
+## 5. Parameter files
 
-## 6. Config Reference
+Parameter files are INI-like: a `[section]` header, then `key = value` lines, with `#` starting a
+comment. A `[mesh]` section might hold `n_cell_global = 512 2 1`, and `[dynamics]` `gamma = 1.4`.
 
-### 6.1 Runtime Parameters (New: June 2026)
+Internally each entry is stored as `section|key`, so programmatic access is
+`args.get< T >( "section", "key" )` or `args( "section", "key", value )`. A key read with a default
+never throws; a key read without one throws if it is missing. Array values are whitespace-separated
+lists. Values are not type-checked until they are read, and an unread key is silently ignored.
 
-| Parameter | Section | Default | Added | Purpose |
-|---|---|---|---|---|
-| `reac_on_const` | `[chemistry]` | `true` | 2026-06 | Place reaction lists in constant vs global device memory |
-| `pole_rebin_threadlim` | `[mesh]` | `32` | 2026-06 | Max GPU threads per block for pole rebinning kernel |
+| section | configures | representative keys |
+|---|---|---|
+| `[mesh]` | extent, block size, geometry, refinement | `x_min`, `x_max`, `n_cell_global`, `n_cell_block` |
+| `[cycle]` | time interval, step control, output cadence | `t_0`, `t_lim`, `dt_init`, `dt_output`, `prefix_output`, `except_ferr` |
+| `[device]` | device selection and streams | `idx_device`, `max_streams`, `seed_rng` |
+| `[boundary]` | boundary conditions, six entries | `kinds`, `ghost_init`, `omega_star` |
+| `[dynamics]` | hydro and MHD scheme and floors | `gamma`, `cfl`, `rho_floor`, `tmp_floor`, `reconstruction` |
+| `[chemistry]` | species, network, ODE solver | `species`, `reaction_file`, `solver`, `rtol`, `atol`, `reac_on_const` |
+| `[radiation]` | ray-tracing radiation | `n_ray_cell`, `n_scat`, `injection`, `dir`, `flux_cgs` |
+| `[multigrid]` | Poisson solver for self-gravity | `mg_lvl`, `n_iter`, `dtol`, `n_smooth` |
+| `[particle]` | tracer and CIC particles | `n_par`, `f_par`, `step_max`, `n_th` |
+| `[fld]` | grey flux-limited diffusion | see `docs/radiation/fld.md` |
+| `[nonideal]` | non-ideal MHD terms | see `docs/mhd/nonideal.md` |
+| `[init]`, `[profile]` | background state and disk/atmosphere profiles | `rho0`, `pre0`, `b0`; `n0`, `r0`, `T0` |
+| `[prob]` | the pgen's private keys | defined by the pgen |
 
-### 6.2 Flexible Memory Placement (`reac_on_const`)
+The disk and atmosphere templates also read `[suppress]`, `[guard]`, `[dust]` and `[sat]`.
 
-The `const_list_t` template (`src/utilities/types/var_list.h`) now supports dual memory
-placement via the `on_const` flag:
+The `[boundary] kinds` list has six entries in the order `x- x+ y- y+ z- z+`; faces outside the
+problem dimension are still listed and ignored. A periodic direction is marked with `per`. The
+accepted kinds are:
 
-- **Constant memory** (`on_const=true`, default): uses `f_malloc_const` + `f_cc` copy.
-  GPU constant memory offers low-latency cached reads but is limited to ~64 KB total
-  (across all modules). Suitable for small to medium reaction databases.
+| kind | meaning |
+|---|---|
+| `ref` | reflecting wall; flips the normal momentum |
+| `out` | outflow: zero-gradient state, inward normal velocity clamped |
+| `fre` | free: zero-gradient, inflow allowed |
+| `fixd` | fixed ghost state taken from `[init]` |
+| `per` | periodic; pairs the two faces |
+| `pol` | spherical theta through-pole continuation; theta sides only |
+| `axs` | cylindrical r through-axis continuation; radial sides only |
 
-- **Regular device memory** (`on_const=false`): uses `f_malloc` + `f_cp` copy. Unlimited
-  capacity at the cost of global memory latency. Required when reaction databases
-  (gas-phase + dust + photon + cooling sub-lists) exceed the constant budget.
+## 6. Chemistry
 
-The flag is propagated from the `[chemistry]` `reac_on_const` parameter through the
-reaction-list hierarchy: `reaction::list::std_t` → `chemistry::reaction::list_t`
-(usr/extension) → each sub-list (`mol_cool`, `atom_cool`, `phot_reac`, `dust_reac`).
-All sub-lists share the same memory policy — you cannot mix constant and global within
-one simulation.
+A reaction network is a `[chemistry]` section that lists the species and points at a reaction
+database. Species names are parsed for charge suffixes (`+`, `-`), parentheses, `*` markers and
+element counts; `e-` is the electron. A reaction whose species is not in the list is silently
+dropped, so a misspelt species shows up as a missing reaction rather than an error.
 
-A `free()` method on `const_list_t` and `reaction::list::std_t` cleans up device memory
-when `on_const=false` (constant memory does not need explicit freeing).
+### 6.1 Abundance representations
 
-### 6.3 Pole Rebin Threading (`pole_rebin_threadlim`)
-
-The pole rebinning kernel (`src/mesh/geometry/pole_rebin.h`) now uses a 2D block grid:
-
-- **Grid:** `n_bl_x × n_bl_y` blocks, where `n_bl_x = ceil(n_cell_x / n_th)` —
-  multiple blocks share the θ-direction work.
-- **Threads per block:** `min(pole_rebin_threadlim, n_cell_x)` — capped for GPU occupancy.
-- **Default:** 32 threads/block. Adjust downwards if pole rebinning occupies too many
-  GPU resources, or upwards (up to ~256) for very wide radial meshes.
-
-Previously the kernel used a 1D grid with one block per θ-cell, which could under-utilize
-the GPU for large polar cell counts.
-
-### 6.4 Product Species Deduplication
-
-Reaction product arrays (`i_chem` / `f_chem`) are now deduplicated during `setup_pars()`
-(`src/modules/chemistry/reaction/reaction.cpp`). After stoichiometric reduction, duplicate
-product entries (same species appearing multiple times) are merged with summed `f_chem`
-coefficients. Reactant multiplicities are preserved because kinetic rate coefficients
-depend on them. This eliminates redundant computation in the chemistry ODE solver.
-
----
-
-## 7. Writing Reaction Databases
-
-### 7.1 Rate Coefficient Conversion (CGS → INI)
-
-**Reference:** `docs/AGENTS.md` §Rate Coefficient Conversion, `docs/Chemistry.tm` §1.1
-
-Kratos uses three abundance representations: CGS number density `n_i` (databases),
-reduced number density `ỹ_i = n_i·m_A/ρ₀` (hydro advection), and molar abundance
-`y_i = n_i·m_A/ρ` (chemistry solver). The hydro solver advects `ỹ_i`; the chemistry
-solver converts to `y_i` by dividing by `ρ̃ = ρ/ρ₀`.
-
-Reaction rate coefficients in the INI file must be pre-converted from number-density
-CGS units to Kratos molar-abundance units. The conversion depends on the number of
-reactants R:
-
-```
-Ã = A · N_A^(R−1)   (CGS)
-```
-
-Where N_A ≈ 6.022e23 in CGS.
-
-| R | Type | Conversion | Database A units → INI Ã |
-|:---:|---|---|---|
-| 1 | Unimolecular | Ã = A | s⁻¹ → s⁻¹ |
-| 2 | Bimolecular | Ã = A·N_A | cm³/s → cm³/s · N_A |
-| 3 | Termolecular | Ã = A·N_A² | cm⁶/s → cm⁶/s · N_A² |
-
-Kratos multiplies the rate expression by ρ^(R−1) automatically in `rate()`.
-
-**Critical rule:** Unimolecular (R=1) reactions require **no** N_A factor. Multiplying a
-dissociation prefactor by N_A inflates the rate by ~6e23, causing solver instability.
-
-### 7.2 Supported Rate Types
-
-| `rate_type` | R | Params | Notes |
+| symbol | definition | units | where |
 |---|---|---|---|
-| `ARR` / `std` / `stand` | any | `A b C` | Modified Arrhenius: k = A·(T/300)^b·exp(−C/T) |
-| `intp` / `inter` | any | `T₁ k₁ T₂ k₂ ...` | Interpolation: k = interp(T, pairs) |
-| `TROE` | any | `A₀ b₀ C₀ A∞ b∞ C∞ α T₁ T₂ T₃ μ̄` | Pressure-dependent Troe falloff (11 params) |
+| `n_i` | number density | cm^-3 | database physics |
+| `y_tilde_i` | `n_i m_A / rho_0` | dimensionless | what the hydro solver advects |
+| `y_i` | `n_i m_A / rho` | dimensionless | what the rate solver consumes |
 
-### 7.3 Troe Falloff Details
+`rho_0` is the code-unit density in CGS, set by the pgen, and `rho` is the local mass density; the
+solver converts by dividing by `rho_tilde = rho / rho_0`. The dimensionless form is numerical:
+number densities in an atmosphere or a disk span many decades, and float arithmetic loses precision
+away from unity.
 
-For pressure-dependent reactions, Kratos computes k(T, n_tot) using the Troe formalism.
-The 11 parameters are interpreted as:
+The mass-action law in number densities is `dn_i/dt = xi k_X prod_j n_I`; multiplying by `m_A/rho`
+gives `dy_i/dt = xi rho^(R-1) lambda_X prod_j y_I` for `R` reactants. Kratos applies the `rho^(R-1)`
+factor inside `rate()`, so the database file must not include it.
 
-- Low-pressure limit: k₀ = A₀·(T/300)^b₀·exp(−C₀/T)
-- High-pressure limit: k∞ = A∞·(T/300)^b∞·exp(−C∞/T)
-- Reduced pressure: P_r = k₀·n_tot / k∞
-- Broadening: F_cent = (1−α)exp(−T/T₃) + α·exp(−T/T₁) + exp(−T₂/T)
-- Effective rate: k = k∞ · (P_r/(1+P_r)) · F
+### 6.2 Converting a database prefactor
 
-where n_tot = ρ/(μ̄·m_A) and m_A = 1.67262e-24 g. At the pure low-pressure limit
-(A∞ ≈ 0), k_eff = k₀·n_tot (linear density scaling). At the pure high-pressure limit
-(k₀ ≈ 0), k_eff = k∞ (density-independent). α ∈ [0,1]; α=0 with large T_i gives the
-Lindemann limit (F=1).
+The INI prefactor `A_tilde` absorbs the CGS-to-code conversion. For `R` reactants,
 
-## 8. Troubleshooting
+```
+A_tilde = A * m_A^-(R-1) = A * N_A^(R-1)
+```
 
-| Symptom | Likely cause |
-|---------|-------------|
-| `Default run function is empty!` | `USRDIR` not set or points to a directory without a `prob::run()` override. Pass `USRDIR=usr_ext/your_pgen` to `make`. |
-| Segfault in `act_bnd` | `p_bdk` is null — you forgot `enroll_comm<>()` or `enroll_bdk<>()` in your module |
-| Parameter not found | Typo in section name or key. Check `section\|key` spelling. Use `get(key, default)` for optional params |
-| MPI deadlock | Two modules using different MPI tags for the same direction. Check communication boundary setup |
-| `q_che unbound` | Chemistry module enrolled but `parasite()` never called — or hydro module was destroyed |
-| NaN in conserved variables | Check `d_floor` and `t_floor` in EOS. Increase floors, decrease CFL, or enable `except_ferr` |
-| build error: `usr_ext/ not found` | `usr_ext/` is a git submodule. Run `git submodule update --init` |
+with `m_A = 1.66054e-24 g`, the atomic mass unit, and `N_A = 1/m_A = 6.022141e23`. Only the prefactor
+changes; the temperature exponent `b` and the activation energy `C` are copied unchanged, because
+`k = A_tilde (T/300)^b exp(-C/T)`.
+
+| `R` | order | conversion | example |
+|---|---|---|---|
+| 1 | unimolecular, dissociation | `A_tilde = A` | `CH4 -> CH3 + H`, `A` in s^-1 |
+| 2 | bimolecular | `A_tilde = A N_A` | `OH + H -> H2O`, `A` in cm^3 s^-1 |
+| 3 | termolecular | `A_tilde = A N_A^2` | `H + H + M -> H2 + M`, `A` in cm^6 s^-1 |
+
+**The unimolecular pitfall.** A dissociation rate gets no `N_A` factor. Multiplying it by `N_A` inflates
+the rate by about 6e23, which makes the network extremely stiff and collapses the solver step size.
+
+### 6.3 Rate types and the Troe form
+
+A reaction block is `[reaction_000001]` with `reactants`, `products`, `rate_type`, `parameters`,
+`energy` and optional `fac_prod`; its entries are whitespace-separated lists.
+
+`rate_type` accepts `ARR` (Arrhenius, the default), `TROE` (pressure-dependent) and `INTP` (same
+Arrhenius form); `parameters` is `A b C` for Arrhenius. `energy` is the energy change in erg per
+particle; with four coefficients it is `e0 + k_B T (e1 + e2 ln(T)^e3)` in the same units, encoding a
+heat-capacity contribution. Listing the same product twice merges the duplicates and sums their
+coefficients; reactant multiplicities are kept, and an explicit `fac_prod` list may give non-unit
+product coefficients.
+
+Troe falloff uses eleven parameters, in this order:
+
+```
+A0  b0  C0   Ainf  binf  Cinf   alpha  T1  T2  T3   mu
+```
+
+with the limits and the broadening factor
+
+```
+k0   = A0   (T/300)^b0   exp(-C0/T)
+kinf = Ainf (T/300)^binf exp(-Cinf/T)
+Pr   = k0 n_tot / kinf,      n_tot = rho / (mu m_p)
+lg_Fc = log10( exp(-T2/T) + alpha exp(-T/T1) + (1-alpha) exp(-T/T3) )
+C     = -0.4 - 0.67 lg_Fc,      N = 0.75 - 1.27 lg_Fc
+lg_F  = lg_Fc / ( 1 + (lg_Pr + C)^2 / (N - D (lg_Pr + C))^2 ),   D = 0.14
+k     = kinf * Pr/(1+Pr) * 10^lg_F
+```
+
+`A0` is the termolecular limiting coefficient and takes the `N_A^2` conversion; `Ainf` is the
+unimolecular limiting coefficient and takes none. `mu` is the mean molecular weight of the collider
+in units of the proton mass `m_p`. When `Ainf` is absent or zero the rate falls back to the
+low-pressure form `k0 n_tot`.
+
+### 6.4 Memory placement
+
+Reaction data lives in a per-list container that is either in device constant memory or in global
+memory. The constant pool is small (tens of kilobytes) and gives the fastest reads, so it is the
+default. When a large network or a large cooling table exceeds the budget, set
+`reac_on_const = false` in `[chemistry]` to move the reaction sub-lists to global memory; the
+cooling, photo-reaction and dust reaction lists share one policy, so the switch applies to all.
+
+## 7. Debugging
+
+Set `except_ferr = 1` in `[cycle]` to trap floating-point errors and device faults at the source:
+the mesh enables the divide-by-zero, invalid and overflow traps before any module initializes.
+
+For a long or large run, build with `ARCH=CUDA` and run in production mode. When a run produces a
+NaN, an illegal memory access or another unexpected abort, do not switch to `HIPCPU` to debug it.
+Keep `ARCH=CUDA`, rebuild the same pgen with `DEBUG=1` after `make clean`, and run under GDB with
+`catch throw` and `break abort`: this stops at the throwing frame for C++ exceptions and at a hard
+abort for device-side failures. A release build reports the stale return value of the failing CUDA
+call, while `DEBUG=1` synchronizes and re-reads the error, so the message belongs to the failing
+call. `ARCH=HIPCPU` with `DEBUG=1` instruments only the host side.
+
+| symptom | likely cause |
+|---|---|
+| `Default run function is empty!` | no pgen defines `prob::run` |
+| `device unspecified` | the pgen did not call `enroll_device` |
+| `Undef bnd <kind>` | misspelt `[boundary] kinds` entry |
+| `Cannot identify ODE solver` | unknown `[chemistry] solver` value |
+| reaction missing from the network | a species is not in `[chemistry] species` |
+| step size collapses | a unimolecular rate was multiplied by `N_A` |
+| constant memory oversize | set `reac_on_const = false` |
