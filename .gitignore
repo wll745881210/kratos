@@ -1,0 +1,30 @@
+#  Build products
+*.[oa]
+*.so
+*~
+*.swp
+*.dat
+*.exe
+*.h5
+*.log
+*.vtk
+*.bin
+build/
+obj/
+bin/
+__pycache__/
+*.pyc
+
+#  Nested repositories.  Each has its own remote and its own history:
+#    usr_ext/  -> kratos_usrproj   (problem generators, gates, test oracle)
+#    docs/dev/ -> kratos_devdocs   (the development record)
+usr_ext/
+docs/dev/
+
+#  Scratch and local state
+test/
+research/
+.dsh-meow/
+.opencode/
+conversations/
+.mplconfig/
