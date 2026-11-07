@@ -22,7 +22,6 @@ usr_ext/
 docs/dev/
 
 #  Scratch and local state
-test/
 research/
 .dsh-meow/
 .opencode/
