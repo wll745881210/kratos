@@ -118,10 +118,11 @@ then every module's `step` in ascending `i_step`; finalize runs in enrollment or
 A problem generator is a directory that defines `prob::run`. `src/main.cpp` throws if no parameter
 file is given and then calls `prob::run`; the default in `src/user/probgen.cpp` is a weak symbol that
 prints `Default run function is empty!`, so a binary is usable only when the pgen supplies a strong
-override. The shipped generators live in the separate `kratos_usrproj` repository; the example below
-is complete and self-contained. Its include paths are written for a generator directory three levels
-below the repository root (`usr_ext/std_tst/<pgen>/`), so `../../../src/...`; a generator one level
-higher, in `usr_ext/<pgen>/`, uses `../../src/...`.
+override. The in-tree example is `usr_example/bow_shock/`, a complete generator with its own hydro
+module; the larger set lives in the separate `kratos_usrproj` repository. The example below is
+complete and self-contained. Its include paths are written for a generator directory three levels
+below the repository root (`usr_example/bow_shock/`), so `../../../src/...`; a generator one level
+higher, in `usr_example/<pgen>/`, uses `../../src/...`.
 
 The generator derives from a module and fills in its hooks. This one starts from a uniform state:
 
@@ -204,8 +205,8 @@ blocks, and `mesh.evolve` runs the cycle.
 
 ## 4. Build and run
 
-GNU Make is the only build system; the binary is `bin/kratos` and only one pgen is compiled per
-binary.
+GNU Make is the only build system; the binary is `bin/kratos` in the build directory and only one
+pgen is compiled per binary.
 
 | variable | default | options |
 |---|---|---|
@@ -215,14 +216,26 @@ binary.
 | `MPI` | `0` | `1` links MPI and defines `__MPI__` |
 | `PRECISION` | `1` | `0` all float, `1` mixed, `2` all double |
 
+Build outside the source tree: `obj/` and `bin/` are created next to the `Makefile`, and a run
+creates its snapshots in the working directory, so both belong in a scratch directory that symlinks
+the sources:
+
 ```bash
-make USRDIR=<pgen_dir> ARCH=CUDA MPI=1 PRECISION=2 -j12
-bin/kratos run.par
+REPO=/path/to/kratos
+mkdir -p ~/scratch/kratos-build && cd ~/scratch/kratos-build
+for d in Makefile src usr usr_example data usr_ext; do
+    [ -e "$REPO/$d" ] && ln -sfn "$REPO/$d" .
+done
+make USRDIR=usr_example/bow_shock ARCH=CUDA MPI=1 PRECISION=2 -j8
+mkdir -p run && cd run
+../bin/kratos /path/to/run.par [override.par ...]
 ```
 
 Sources are discovered automatically from `src/`, `$(USRDIR)` and `$(EXTDIR)`; there are no source
 lists. `make clean` removes `obj/` and `bin/`, and `make remake` runs `clean` then `all`. Always
 `make clean` when switching `ARCH`. A binary without a pgen prints `Default run function is empty!`.
+A generator that lives outside the repository — a checkout of `kratos_usrproj`, for instance — is
+symlinked the same way and named as `USRDIR`.
 
 The command line accepts one or more parameter files; later files override earlier ones. A snapshot
 is written as `<prefix_output>_<5-digit index>.bin`, and `visual/hydro_data.py` reads it back with

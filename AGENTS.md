@@ -5,16 +5,34 @@ must follow.  `README.md` covers what the project is and how to run it.
 
 ## Build and run
 
+**Never build or run inside the repository.**  A build writes `obj/` and `bin/` next to the
+`Makefile`, and a run writes snapshots into the working directory; neither belongs in a git
+worktree, where the files are ignored (so they survive `git status`), travel with a sync, and leave
+a stale `bin/kratos` for the next reader.  Symlink the sources into a scratch directory and work
+there:
+
 ```bash
-make USRDIR=<pgen-dir> ARCH=CUDA DEBUG=0 MPI=0 PRECISION=1
-bin/kratos problem.par [override.par ...]
-make clean     # remove bin/ and obj/
-make remake    # clean, then build
+REPO=/path/to/kratos
+mkdir -p ~/scratch/kratos-build && cd ~/scratch/kratos-build
+for d in Makefile src usr usr_example data usr_ext; do
+    [ -e "$REPO/$d" ] && ln -sfn "$REPO/$d" .
+done
+make USRDIR=usr_example/bow_shock ARCH=CUDA DEBUG=0 MPI=0 PRECISION=2 -j8
 ```
 
-GNU Make is the only build system and every flag lives in `Makefile`.  Sources are discovered with
-`find` under `src/`, `$(USRDIR)` and `$(EXTDIR)` (`usr/extension/` by default), so there is no
-source list to edit.  The variable meanings are in `README.md`.
+Run from a directory of its own, so that the output files stay out of the tree as well:
+
+```bash
+mkdir -p run && cd run
+../bin/kratos /path/to/problem.par [override.par ...]
+```
+
+`make clean` (which removes `bin/` and `obj/`) and `make remake` work the same way in that
+directory.  GNU Make is the only build system and every flag lives in `Makefile`.  Sources are
+discovered with `find` under `src/`, `$(USRDIR)` and `$(EXTDIR)` (`usr/extension/` by default), so
+there is no source list to edit.  The variable meanings are in `README.md`.  A problem generator
+outside the repository — a checkout of the private `kratos_usrproj`, for instance — is symlinked the
+same way and named as `USRDIR`.
 
 ## The one-pgen rule
 

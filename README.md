@@ -18,10 +18,19 @@ The physics modules:
 ## Quick start
 
 GNU Make is the only build system.  `USRDIR` selects the problem generator to compile; the binary is
-always `bin/kratos`.
+always `bin/kratos` in the directory you build in.
+
+Build outside the source tree: a build writes `obj/` and `bin/` next to the `Makefile`, and a run
+writes its snapshots into the working directory, so neither belongs inside a git worktree.  Symlink
+the sources into a scratch directory and build there:
 
 ```bash
-make USRDIR=<pgen-dir> ARCH=CUDA DEBUG=0 MPI=0 PRECISION=1
+REPO=/path/to/kratos
+mkdir -p ~/scratch/kratos-build && cd ~/scratch/kratos-build
+for d in Makefile src usr usr_example data usr_ext; do
+    [ -e "$REPO/$d" ] && ln -sfn "$REPO/$d" .
+done
+make USRDIR=usr_example/bow_shock ARCH=CUDA DEBUG=0 MPI=0 PRECISION=2 -j8
 ```
 
 | variable | values | meaning |
@@ -32,10 +41,12 @@ make USRDIR=<pgen-dir> ARCH=CUDA DEBUG=0 MPI=0 PRECISION=1
 | `MPI` | `0` (default), `1` | Adds `-D__MPI__` and links MPI. |
 | `PRECISION` | `1` (default), `0`, `2` | `0` = all single, `1` = single/double mixed, `2` = all double.  See `src/types.h`. |
 
-Run the binary with one parameter file and optional override files (later files win):
+Run the binary from a directory of its own, with one parameter file and optional override files
+(later files win); the output lands in that directory:
 
 ```bash
-bin/kratos problem.par [override.par ...]
+mkdir -p run && cd run
+../bin/kratos problem.par [override.par ...]
 ```
 
 A minimal parameter file (INI-like: `[section]` headers, `key = value` lines, `#` comments):
@@ -69,7 +80,8 @@ Inside the code each entry is addressed as `section|key`, so a value is read wit
 | `visual/` | Python post-processing: snapshot readers and plotting scripts. |
 | `data/` | Data files: chemistry networks and cooling tables. |
 | `docs/` | Documentation: user guide, style guide, module pages (`mhd/`, `radiation/`) and method papers. |
-| `usr_ext/` | Nested repository `kratos_usrproj`: the problem generators.  Not tracked here. |
+| `usr_example/` | A complete problem generator in the trunk (`bow_shock/`), with its own module and parameter file. |
+| `usr_ext/` | Nested repository `kratos_usrproj`: the private problem generators and verification programs.  Not tracked here. |
 | `docs/dev/` | Nested repository `kratos_devdocs`: the development record.  Not tracked here. |
 
 The trunk's documentation is the user-facing part.  The project's development record lives in the

@@ -1,0 +1,42 @@
+[device]
+# idx_device = 0
+
+[mesh]
+x_min         = -1 -4  0
+x_max         =  7  4  4
+n_cell_global = 256  256  128
+n_cell_block  =  64   64   64
+
+[refine_region_00]
+level  = 1
+x_min  =  -0.1 -1e-5   0e-5
+x_max  = 2.001  1e-5   1e-5
+
+[cycle]
+prefix_output  = bs
+n_cycle_lim    = 100000000
+n_display_freq = 10 0
+t_lim          = 3e0
+dt_output      = 1e0
+t_output_next  = 1e99
+final_output   = 0
+t_gf_out_next  = 1e0
+dt_gf_out      = 1e0
+stat_grav      = 1
+
+[dynamics]
+gamma         = 1.4
+thread_limit  = 256
+
+[boundary]
+kinds = inflow out out out out out
+
+[prob]
+g_m       = 1e-3
+mdot      = 13
+v_outflow = 10
+r_sink    = 0.1
+r_soft    = 0.1
+rho0      = 1
+pre0      = 1
+vel0      = 5 0 0
