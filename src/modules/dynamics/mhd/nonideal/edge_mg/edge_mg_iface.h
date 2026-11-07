@@ -25,11 +25,8 @@ using type::float_t;
 
 ////////////////////////////////////////////////////////////
 //  Knobs.  All under  [nonideal]  with the  ee_  prefix.
-//  Every one of them defaults to the OFF value, except
-//  ee_method:  it defaults to 5 ( the device matrix-free
-//  backend,  the shipped one ),  with a loud fallback to 2
-//  for the two knobs that backend cannot carry
-//  ( ee_refine,  ee_a_bridge ).  See par_t::read().
+//  Every one of them defaults to the OFF value;  the leg
+//  runs only when  ee_enable > 0.  See par_t::read().
 
 struct par_t
 {

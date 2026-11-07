@@ -22,8 +22,7 @@
 #include "kernels/ni_mg_kernels.h"
 
 ////////////////////////////////////////////////////////////
-//  The device-resident,  MATRIX-FREE multigrid ( ee_method
-//  = 5 ).
+//  The device-resident,  MATRIX-FREE multigrid.
 //
 //  The operator is
 //

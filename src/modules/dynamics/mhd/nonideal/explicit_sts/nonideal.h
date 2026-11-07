@@ -1105,7 +1105,7 @@ struct ni_t : base_T
               " silently ignored."
               "  Set mg_cc = 0 and use the explicit coupled leg"
               " ( mode = 0 ),  the edge-centred implicit step"
-              " ( ee_method = 5 ),  or turn non-ideal off." );
+              " ( ee_enable = 1 ),  or turn non-ideal off." );
         if( args.get< int >( "nonideal", "mg_cc_eta_var", 0 ) )
             throw std::runtime_error
             ( "mhd_ee::ni:  [nonideal] mg_cc_eta_var = 1 was how the"

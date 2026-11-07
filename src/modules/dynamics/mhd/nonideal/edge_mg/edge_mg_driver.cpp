@@ -583,7 +583,7 @@ __host__ void driver_t::_gradient
 
 //  ---- 3. the blocks,  assembled on the device
 //
-//  A matrix-free step ( ee_method = 5 ) with the device
+//  A matrix-free step with the device
 //  write-back consumes them IN PLACE:  level 0 reads them as
 //  they are and every coarse level aggregates them.  The
 //  read-back below therefore happens ONCE,  when the device
