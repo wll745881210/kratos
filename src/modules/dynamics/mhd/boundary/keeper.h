@@ -54,8 +54,7 @@ ker_ghost_fill( const d3d_T arr,
 //  single cell has no neighbour,  so its wrap slots must
 //  BE the slot - 0 face --  left at the zeroed ghost the
 //  corner EMFs read a phantom face and the CT stops
-//  telescoping  ( the  n_phi = 1  south - pole leak,
-//  2026-10-21 ).
+//  telescoping.
 template< class bdt_T >
 __global__ void thin_axis_sync_k( const bdt_T b_d )
 {
@@ -126,7 +125,7 @@ public:                         // Functions
                      ( "boundary", "ghost_init", 0.0 );
         //  fixd: Dirichlet ghost state = the ambient
         //  medium.  The boundary functors operate on the
-        //  PRIMITIVE w,  so the fix is simply
+        //  PRIMITIVE w,  so the ghost is simply
         //  ( rho0, pre0, vel0, b0 ).
         {
             const auto rho0 = args.get< type::float2_t >
@@ -163,7 +162,7 @@ protected:                      // Functions
     //  enrolled physical functors decide  ( dynamic_cast ),
     //  assign_phys runs per block before any step.   This
     //  drives the boundary - plane advective edge EMF  (
-    //  calc_field;  the r_out field - anchoring fix ).
+    //  calc_field;  the r_out field anchoring ).
     virtual void assign_phys( block_t & b, mesh_t & mesh )
     {
         hydro::boundary::keeper_t::assign_phys( b, mesh );

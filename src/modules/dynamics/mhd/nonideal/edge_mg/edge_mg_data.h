@@ -8,11 +8,9 @@
 //  Edge-centred implicit tensor diffusion: the data the
 //  solver works on.
 //
-//  Everything here is NON-TEMPLATE and trivially copyable
-//  ( rule C2 of docs/mhd/nonideal/edge-mg-foundations.md
-//  section 3.3 ):  the device code never sees a pgen
-//  specific block-data type,  so the pgen TU instantiates
-//  no kernel of this module.
+//  Everything here is NON-TEMPLATE and trivially copyable:  the
+//  device code never sees a pgen specific block-data type,  so
+//  the pgen TU instantiates no kernel of this module.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -37,7 +35,8 @@ using mesh::   geo_t;
 //          { xx, yy, zz, xy, xz, yz }.
 //
 //  The solver reads bf / w and writes nothing but a / eta
-//  at S0' ( the identity step of section 9 ).
+//  when ee_solve == 0,  the diagnostic leg that leaves the
+//  state untouched.
 
 struct eta_cc_t
 {
@@ -55,21 +54,19 @@ struct view_t
 };
 
 ////////////////////////////////////////////////////////////
-//  Level-0 bookkeeping.  The coarse levels arrive with the
-//  MG ( S2 );  this is the shape they will hang on:  one
-//  grid per level,  the level's own n_ceff,  and the
-//  per-level coefficient stencils ( fixed length,  see
-//  spec section 4.2 ).
+//  Level-0 bookkeeping.  Every coarse level uses the same
+//  shape:  one grid per level,  the level's own n_ceff,  and
+//  the per-level coefficient stencils ( fixed length ).
 
 ////////////////////////////////////////////////////////////
 //  The per-cell cache slot:  ONE struct,  ONE array
 //  ( dat_3d_t< cell_blk_t > ),  so a cell's whole local
 //  assembly is contiguous ( 1600 B,  128 B aligned ).
 //
-//  Only m1 / m2 / m12 / detj are needed for the gates;  k
-//  is the eta-dependent half of the operator and is the one
-//  that gets rebuilt when eta or dt changes
-//  ( edge-mg-foundations.md 4.0:  dt is NEVER baked in ).
+//  Only m1 / m2 / m12 / detj are independent of eta;  k is
+//  the eta-dependent half of the operator and is the one that
+//  gets rebuilt when eta or dt changes ( dt is NEVER baked
+//  in ).
 
 struct cell_blk_t
 {

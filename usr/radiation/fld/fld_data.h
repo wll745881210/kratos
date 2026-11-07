@@ -28,14 +28,14 @@ struct bdt_fld_t : multigrid::data::block_data_t
 
     mesh::dat_3d_t< f_T >  co_arr;
     mesh::dat_3d_t< f_T >  e_iter;
-    //  The per - cell source  ( the stage - A / ppd hook:
-    //  the analytic irradiation or the MCRT deposition ):
+    //  The per - cell source  ( the ppd hook:  the analytic
+    // irradiation or the MCRT deposition ):
     //  s_ir[ 0 ] = the emission  a T^4  of the closure
     //  ( filled by the driver's temperature loop ),  s_ir[ 1 ]
     //  = the external deposition  ( irradiation ).
     mesh::dat_3d_t< f_T >  s_ir;
-    //  The stage - B MCRT - style deposition inputs  ( n = 1
-    // per segment;  the single - segment bench carries
+    //  The MCRT - style deposition inputs  ( n = 1 per
+    // segment;  the single - segment configuration uses
     // n = 0;  the ppd hookup swaps these for the rad
     // aliases --  flx . mfp hold the MCRT convention:
     //    flx  --  the per - segment flux  ( lumin ds / V
@@ -63,8 +63,7 @@ struct bdt_fld_t : multigrid::data::block_data_t
     // a fixed point  (  the  LTE identity trap  ) ).   T_m
     // relaxes per step from the local energy budget:
     //      sig ( a T_m^4 - E )  exchange  +  S  heating
-    // solved implicitly with  E  ( the  fld - method.md
-    // § 5 two - T closure ).
+    // solved implicitly with  E  ( the two - T closure ).
     mesh::dat_3d_t< f_T >  t_mat;
 
     //  The per - level ghost width  (  order  per non -

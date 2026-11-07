@@ -8,8 +8,8 @@
 //  `build` derives the per-level complex,  the transfer
 //  stencils and the per-dof cell counts ONCE per setup;  the
 //  device then runs from those tables and never rebuilds
-//  them ( AGENTS.md,  "the data side" ).  The `hier_t`
-//  layout and its data stay in the header.
+//  them.  The `hier_t` layout and its data stay in the
+//  header.
 
 namespace mhd_ee::ni::edge_mg
 {

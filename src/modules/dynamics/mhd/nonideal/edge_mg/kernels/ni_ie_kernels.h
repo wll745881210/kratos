@@ -194,10 +194,9 @@ static __global__ void eta_grad_k
             //  `base + ( idr[u] - i ) * 6` reads the middle
             //  of another
             //  cell's tensor: with a CONSTANT eta the
-            //  gradient then comes
-            //  out as garbage rather than zero, which is
-            //  exactly how the
-            //  sub-cell control in gate M9 caught it.
+            //  gradient then comes out as garbage rather than
+            //  zero, which is why every offset is written as
+            //  a difference of cell indices.
             const float_t vr0 = float_t( p_lat[ base + (
                 idr[ 0 ] - i ) * 6 ] );
             const float_t vr1 = float_t( p_lat[ base + (

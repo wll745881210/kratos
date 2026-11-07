@@ -6,7 +6,6 @@ namespace dynamics::mhd::integrator
 {
 ////////////////////////////////////////////////////////////
 //  The polar phi - rebin of the MHD state.
-//  docs/mhd/pole-rebin.md.
 // The hydro part is the  mesh::rebin_t  phi - group
 // average.  The face field takes a DIVERGENCE - PRESERVING
 // rebin:  the groups average the two face families that
@@ -109,16 +108,14 @@ __global__ void ker_pole_rebin_bf_ramp
     //  A group that wraps the WHOLE periodic ring has no
     //  free end faces  ( slot 0 and slot n_2 are the same
     //  physical face ),  so the div - free profile there is
-    //  a CONSTANT -- the ramp is inadmissible.  Worse, its
-    //  slope  V / A_phi  amplifies the field 's own
-    //  residual  ( A_phi ~ r dr dth  is far smaller than
-    //  the r / theta areas )  and the whole swing lands on
-    //  the seam cell:  the sp32 long - run r_out x polar
-    //  blow - up grew exactly there.  The constant is the
-    //  area - weighted mean  ( the areas are phi - uniform,
-    //  so the toroidal flux is conserved );  the residual
-    //  uniform divergence  V  is the field 's own,  left
-    //  unamplified.
+    //  a CONSTANT -- the ramp is inadmissible.  Its slope
+    //  V / A_phi  amplifies the field's own residual  (
+    //  A_phi ~ r dr dth  is far smaller than the r / theta
+    //  areas )  and the whole swing would land on the seam
+    //  cell.  The constant is the area - weighted mean  (
+    //  the areas are phi - uniform,  so the toroidal flux
+    //  is conserved );  the residual uniform divergence  V
+    //  is the field's own,  left unamplified.
     const int d_th( utils::min( i[ 1 ],
                                 geo.n_ceff[ 1 ] - 1 - i[ 1 ] ) );
     const f2_t alpha( reb.pole_rebin_alpha( d_th ) );
@@ -131,24 +128,18 @@ __global__ void ker_pole_rebin_bf_ramp
     //  itself and is the right profile there.
     if( n_g == n_2 && alpha >= f2_t( 0.999 ) )
     {
-        //  CLOSED FULL RING  ( 2026-10-22,  P1 fix ).  The old
-        //  body replaced the whole ring by its CONSTANT mean,
-        //  which zeroes the phi - flux difference of EVERY cell
-        //  in the band while the r/theta balance is untouched --
-        //  a per-cell divergence  - a_p * ( B_phi^{old}(k+1) -
-        //  B_phi^{old}(k) ).  That is the injection:  the
-        //  r_out x polar x seam corner  ( 63, 511, 7 )  sits in
-        //  this band and read  | D.B | = 10.7.  The comment's
-        //  claim that "the constant is the only closed profile"
-        //  is wrong:  the ring's OWN per-cell balances give the
+        //  CLOSED FULL RING.  Replacing the whole ring by its
+        //  constant mean would zero the phi - flux difference of
+        //  EVERY cell in the band while the r/theta balance is
+        //  untouched -- a per-cell divergence
+        //  - a_p * ( B_phi^{old}(k+1) - B_phi^{old}(k) ).
+        //  The ring's own per-cell balances instead give the
         //  unique div-free profile up to a constant,  and their
         //  sum is zero for a div-free ring ( the phi terms
         //  telescope ),  so the cumulative profile closes.
         //  Subtract the mean of the balances ( the field's own
-        //  residual ) so the ring closes EXACTLY and every cell
-        //  keeps only that small uniform residual -- neither the
-        //  constant profile's per-cell swing nor the old worry of
-        //  piling everything onto the seam cell.
+        //  residual ) so the ring closes EXACTLY and each cell
+        //  keeps only that small uniform residual.
         type::idx_t q0( i ), qr( i ), qt( i );
         q0[ 2 ] = 0;   qr = q0;   ++ qr[ 0 ];   qt = q0;   ++ qt[ 1 ];
         const f2_t a_r0( geo.surface( q0, 0 ) );
@@ -217,28 +208,20 @@ __global__ void ker_pole_rebin_bf_ramp
           - a_t1 * b_d.fld.bf.at( f_t, step )[ 1 ] );
         j = f_0;
         const f2_t b_0( b_d.fld.bf.at( j, step )[ 2 ] );
-        //  PER-CELL CUMULATIVE RAMP  ( 2026-10-22,  P1 ).
-        //  The constant slope  t_bal / a_p  above is exact only if
-        //  the r/theta balance is GROUP-CONSTANT -- the premise
-        //  Phase 1's own comment states.  The band-edge taper
-        //  ( alpha = 1 inside,  1/3 at the outermost rebinned row )
-        //  breaks it:  the blended average is only partial,  so
+        //  PER-CELL CUMULATIVE RAMP.  The constant slope
+        //  t_bal / a_p is exact only if the r/theta balance is
+        //  GROUP-CONSTANT;  the band-edge taper breaks it,  so
         //  the balance varies inside the group and the constant
-        //  slope leaves the per-cell residual
+        //  slope leaves the residual
         //      ( r + theta )_k  -  ( r + theta )_{ f_0 }
-        //  on exactly the tapered rows -- which is where the
-        //  r_out x polar x seam corner  ( 63, 511, 7 )  lives
-        //  ( measured:  | D.B | = 10.7 there against ~1e-3 with
-        //  the whole rebin off;  docs/mhd/nonideal/STATUS.md ).
-        //  Each cell now closes on its OWN balance.  The group
-        //  still lands on its ORIGINAL group-boundary face:  the
-        //  Phase 1 blend is sum-preserving per face row
-        //  ( sum_j alpha ( avg - old ) = 0 ),  so  sum_k t_bal_k
-        //  is unchanged and the pre-rebin div-free identity still
-        //  closes the group -- and the last cell keeps exactly the
-        //  residual it had before,  so the seam is not made worse.
-        //  Only the INTERNAL faces are written,  as before ( the
-        //  group boundary at  j0 + n_g  stays anchored ).
+        //  on exactly the tapered rows.  Each cell closes on its
+        //  OWN balance.  The group still lands on its ORIGINAL
+        //  group-boundary face:  the Phase 1 blend is
+        //  sum-preserving per face row  ( sum_j alpha ( avg -
+        //  old ) = 0 ),  so  sum_k t_bal_k  is unchanged and the
+        //  pre-rebin div-free identity still closes the group.
+        //  Only the INTERNAL faces are written  ( the group
+        //  boundary at  j0 + n_g  stays anchored ).
         f2_t b_k( b_0 );
         for( int k = 0; k < n_g - 1; ++ k )
         {
@@ -265,11 +248,10 @@ __global__ void ker_pole_rebin_bf_ramp
 struct mhd_rebin_t : mesh::rebin_t
 {
     //  [mesh] pole_rebin_bf  ( 1 ) :  the face - field
-    //  rebin;  0 leaves bf alone ( the hydro - only mode
-    //  of the legacy drivers ).
+    //  rebin;  0 leaves bf alone.
     int rebin_bf;
     //  [mesh] pole_rebin_ntaper:  the number of band rows the
-    //  taper fades over ( >= 1 ).  3 is the historical value.
+    //  taper fades over ( >= 1 ).   Default 3.
     int n_taper_;
 
     __host__ mhd_rebin_t(  )
@@ -298,18 +280,11 @@ struct mhd_rebin_t : mesh::rebin_t
     __host__ __device__ __forceinline__ type::float_t
     pole_rebin_alpha( const int_T & d_th ) const
     {
-        //  BAND-EDGE TAPER  ( [mesh] pole_rebin_ntaper,  default 3
-        //  = the historical hard-coded value => bit-identical ).
+        //  BAND-EDGE TAPER  ( [mesh] pole_rebin_ntaper ).
         //  The rebuild's outermost in-band row keeps  alpha =
-        //  1 / n_taper,  so the jump to the untouched rows beyond
-        //  is exactly 1 / n_taper:  the "_bf rebuild is the driver
-        //  of the 3D exponential divergence" A/B (2026-10-23)
-        //  showed the amplification is at that EDGE,  not in any
-        //  particular row -- narrowing the band made it WORSE
-        //  (doubling 39 -> 31 -> 26 cycles for lvl 6 -> 4 -> 2,
-        //  with the level at c40 rising 3.0e-2 -> 8.3e-2 -> 3.8e-1)
-        //  while turning the rebuild off entirely is stable
-        //  (-0.0015 dex/cycle).  A larger n_taper shrinks the jump
+        //  1 / n_taper,  so the jump to the untouched rows
+        //  beyond is exactly 1 / n_taper.  The amplification is
+        //  at that EDGE:  a larger n_taper shrinks the jump
         //  proportionally.
         const int n_taper( n_taper_ );
         if( d_th >= rebin_lvl )
@@ -346,13 +321,12 @@ struct mhd_rebin_t : mesh::rebin_t
     {
         if( rebin_lvl < 1 )
             return;
-        //  The HOST geometry:  the device view 's
-        //  coordinate tables ( xf / xv ) are DEVICE
-        //  pointers,  so any  x_fc  on the host view
-        //  segfaults as soon as an axis is non - uniform
-        //  ( the PPD theta stretching ).   The base 's
-        //  at_pole has the same hazard,  which is why the
-        //  launches below are written out here.
+        //  The HOST geometry:  the device view's coordinate
+        //  tables ( xf / xv ) are DEVICE pointers,  so any
+        //  x_fc on the host view segfaults as soon as an
+        //  axis is non - uniform.   The base's at_pole has
+        //  the same hazard,  which is why the launches below
+        //  are written out here.
         const auto & geo( d.h(  ).geo );
         //  The rebin counts phi as axis 2 and the polar
         //  faces as axis 1:  spherical only.

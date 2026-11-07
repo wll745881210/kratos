@@ -30,21 +30,14 @@
 //      consistent and the pole / axis averaging
 //      kernels act on the total emf.
 //    - The magnetic energy flux of the diffusion (
-//  S = e_dif x B ) carries BOTH the transport and the
-//  dissipation
-//  of the magnetic energy; depositing it into u[ ene ] is
-//  what
-//  leaves the gas with exactly dt eta J^2 ( without it the
-//  gas
-//  would also absorb the transport term dt div S as
-//  spurious
-//  heat -- see the algebra at the implicit leg's read of
-//  the same
-//  knob ). Same structure as Athena++'s AddPoyntingFlux ->
-//  IEN.
-//  Gated by [nonideal] mg_cc_ene ( DEFAULT 1 = on; 0 for an
-//  efficiency / budget study ); the term stays per-cell
-//  Ohmic and
+//      S = e_dif x B ) carries BOTH the transport and the
+//      dissipation of the magnetic energy; depositing it
+//      into u[ ene ] leaves the gas with exactly
+//      dt eta J^2 ( without it the gas would also absorb
+//      the transport term dt div S as spurious heat ).
+//      Same structure as Athena++'s AddPoyntingFlux -> IEN.
+//      [nonideal] mg_cc_ene ( default 2 ) selects the
+//      deposit form;  0 turns it off,  and the Ohmic and
 //      ambipolar heating powers are accumulated in
 //      b_d.fld.heat ( Hall does not heat:
 //      J . ( J x B^ ) == 0 ).
@@ -134,17 +127,14 @@ struct hall_len_eta_t
     };
 };
 
-//  Power - law - in - density diffusivities  ( Stage V1:
-//  the mg_cc variable - eta provider ):  eo = eta_o (
-//  rho / rho_ref )^alpha_o,  ea likewise;  eh = 0 ( the
-//  Hall term stays out of the implicit operator ).
-//  alpha = 0 reduces to the constant.   Separate prof_*
-//  pars so  ni_t 's explicit sweep  ( keyed on eta_* )
-//  stays off.
+//  Power - law - in - density diffusivities:  eo = eta_o
+//  ( rho / rho_ref )^alpha_o,  ea likewise;  eh = 0 ( the
+//  Hall term stays out ).  alpha = 0 reduces to the
+//  constant.   Separate prof_* pars so  ni_t 's explicit
+//  sweep  ( keyed on eta_* )  stays off.
 //  [profile] eta_out_kill ( bit flags:  1 = both,
 //  2 = eo,  3 = ea )  zeroes the eta in the last N
-//  x0 - rows  ( the r_out - band A / B probe,  mirroring
-//  the PPD disk_eta_t diagnostic ).
+//  x0 - rows.
 struct prof_eta_t
 {
     type::float_t eta_o, eta_a, rho_ref, alpha_o, alpha_a;
@@ -285,9 +275,8 @@ void ni_cur_k( const bdt_T b_d, const itg_T f_itg,
             //  periodic row the ghost IS comm - filled and
             //  the ghost - reading backward difference is
             //  the correct centred cross - seam form  ( the
-            //  one - sided form mis - fired there and
-            //  corrupted the cross - interface current --
-            //  the multi - block decay - rate bug ).
+            //  one - sided form is wrong there and corrupts
+            //  the cross - interface current ).
             if( ! th_1 )
             {
                 f2_t t;
@@ -410,18 +399,13 @@ void ni_cur_k( const bdt_T b_d, const itg_T f_itg,
 //  refused in ni_t::init ).
 //
 //  The tensor is stored as DATA ( Voigt,  n_int = 6 ) so
-//  that the solver's kernels never see a provider type
-//  ( rule C3,  edge-mg-foundations.md section 3.3 ).
+//  that the solver's kernels never see a provider type.
 //  Ambient limit:  with |B| -> 0 the anisotropic part has
 //  no direction,  so eta -> eo I.
-
-//  THE TENSOR OF ONE CELL lives in its own light header (
-//  eta_tensor.h ), so
-//  the gate ( usr_ext/mhd_ee/gate_eta_fill.cpp ) can
-//  evaluate the SAME
-//  algebra without pulling this TU's integrator in. One
-//  implementation:
-//  ni_eta_fill_k below calls it,  and so does the gate.
+//  The per - cell tensor algebra lives in its own light
+//  header ( eta_tensor.h ), so it can be reused without
+//  pulling this TU's integrator in;  ni_eta_fill_k below
+//  is the caller in this file.
 
 template< class bdt_T, class eta_T >
 __global__ void ni_eta_fill_k
@@ -526,12 +510,8 @@ void ni_emf_k( const bdt_T b_d, const itg_T f_itg,
                 b_e[ n ] /= n_c;
             eo /= n_c;  eh /= n_c;  ea /= n_c;
 
-            //  Stage H3:  the upwind Hall bias
-            //  ( knob  hall_upw,  off by
-            //  default ).
-            //  see implicit-nonideal-mg-method.md
-            //  ( H3 );
-            //  chronicle §7.76.
+            //  The upwind Hall bias ( knob
+            //  hall_upw,  off by default ).
             const f2_t eh_a ( __abs1( eh ) );
             auto fu_ax = [ & ] ( const int & ax )
             {
@@ -571,7 +551,7 @@ void ni_emf_k( const bdt_T b_d, const itg_T f_itg,
                 const int t_lo = ( ax >= n_dm ||
                                    i[ ax ] == 0 )
                                ? 0 : -1;
-                //  H3:  the upwind bias weights on the
+                //  The upwind bias weights on the
                 //  a / ax float_t loop ( s = 1 moves +e_a
                 // --  the right edge of the a - face pair;
                 //  t = 0 the +e_ax side ( k = i itself
@@ -632,11 +612,8 @@ void ni_emf_k( const bdt_T b_d, const itg_T f_itg,
                               / bn
                        + ea * ( j_c[ a ]
                                 - jb / b2 * b_e[ a ] );
-                //  Stage H4:  the fourth - order
-                //  whistler hyper - resistivity
-                //  ( knob hall_chyp ).
-                //  see implicit-nonideal-mg-method.md
-                //  ( H4 );  chronicle §7.78.
+                //  The fourth - order whistler
+                //  hyper - resistivity ( knob hall_chyp ).
                 if( chyp > f2_t( 0 ) )
                 {
                     f2_t lap ( 0 );
@@ -697,23 +674,20 @@ void ni_emf_k( const bdt_T b_d, const itg_T f_itg,
             b_d.fld.e_dif.at( i )[ a ] = e_d;
             //  Coupled ( ACC ):  augment the ideal emf in
             //  place.   Split ( ! ACC ):  ee is the
-            //  diffusion-emf working buffer.  BOTH store
-            //  only the OWNED edges ( i[ a ] < n_ceff[ a ],
-            //  matching calc_field ):  the +-boundary rows
-            //  are delivered by the edge exchange ( act_flx
-            //  );  writing them here left un-reconciled
-            //  local values that mixed with the exchange
-            //  and produced the SMR NaN.   A thin - axis
-            //  COMPONENT ( a >= n_dm ) is NOT an unowned
-            //  slot:  the poloidal faces' curl differences
-            //  run along the NON - thin axes,  so they
-            //  survive intg_field and read ee [ .. ][ a ]
+            //  diffusion-emf working buffer.  BOTH store only
+            //  the OWNED edges ( i[ a ] < n_ceff[ a ],
+            //  matching calc_field ):  the +-boundary rows are
+            //  delivered by the edge exchange ( act_flx ) and
+            //  writing them here would leave un-reconciled
+            //  local values that mix with the exchange.  A
+            //  thin - axis COMPONENT ( a >= n_dm ) is NOT an
+            //  unowned slot:  the poloidal faces' curl
+            //  differences run along the NON - thin axes,  so
+            //  they survive intg_field and read ee [ .. ][ a ]
             //  ( it drops only the terms whose DIFFERENCE
-            //  direction is thin ). In 2.5D ee [ .. ][ 2 ]
-            //  is therefore the whole poloidal evolution --
-            //  zeroing it froze the split / STS diffusion
-            //  leg ( the coupled branch below never did,
-            //  and neither does calc_field ).
+            //  direction is thin ). In 2.5D ee [ .. ][ 2 ] is
+            //  therefore the whole poloidal evolution and must
+            //  not be zeroed.
             if( ACC )
             {
                 if( i[ a ] < geo.n_ceff[ a ] )
@@ -1000,9 +974,9 @@ void ni_ene_k( const bdt_T b_d, const itg_T f_itg,
     return;
 };
 
-//  Parabolic dt limit ( STS sizing ).
-//  see implicit-nonideal-mg-method.md
-//  ( H2:  the Hall stiffness joins ).
+//  Parabolic dt limit for the STS sizing,  with the Hall
+//  stiffness included  ( parabolic form:  lam_max ~
+//  ed k_max^2 ).
 template< class bdt_T, class eta_T >
 __global__
 void ni_dtlim_k( const bdt_T b_d, const eta_T f_eta,
@@ -1063,9 +1037,7 @@ struct ni_t : base_T
     //  Time-integration mode:  0 = coupled ( the diffusion
     //  emf rides the ideal ee through the RK2 step );
     //  1 = Godunov split ( a separate diffusion sweep after
-    //  the ideal step;  the implicit / multigrid
-    // foundation, validated on uniform AND SMR meshes
-    // ).   Read from [nonideal] mode.
+    //  the ideal step ).   Read from [nonideal] mode.
     int     mode { 0 };
     //  Super-time-stepping ( split mode only ):  relax the
     //  parabolic dt cap and cover the diffusion with s
@@ -1073,50 +1045,37 @@ struct ni_t : base_T
     //  Athena++ operator_split ).   sts_nu is the damping.
     bool                sts    { false };
     type::float_t      sts_nu { 0.01 };
-    //  [nonideal] mg_cc_ene ( DEFAULT 1 ): deposit the
-    //  modelled
-    //  diffusion Poynting flux into u[ ene ]. This is
-    //  REQUIRED: the
-    //  field's energy change contains a transport part (
-    //  div S ) that
-    //  must NOT be handed to the gas as heat, and the
-    //  deposit is what
+    //  [nonideal] mg_cc_ene:  deposit the diffusion energy
+    //  into u[ ene ]. This is REQUIRED: the field's energy
+    //  change contains a transport part ( div S ) that must
+    //  NOT be handed to the gas as heat, and the deposit
     //  removes it, leaving the gas with exactly dt eta J^2.
-    //  See the
-    //  algebra at the implicit leg's read of the same key.
-    //  0 = off, 1 = the modelled Poynting flux ( default ),
-    //  2 = the METRIC-FREE measured form ( see
-    //  mg_ni_ene_mf_k ):
+    //  0 = off,  2 = the METRIC-FREE measured form ( default ):
     //      u[ ene ] += ( |B*_cc|^2 - |B^n_cc|^2 ) / 2
     //  + dt ( eta_o |J|^2 + eta_a |J_perp|^2 ),
     //  cell-local, so the polar surface / volume metric is
-    //  never
-    //  divided -- form 1 has that hazard at the polar axis.
+    //  never divided.
     int                 ene_dep{ 1 };
-    //  [nonideal] mg_cc_ene_heat ( DEFAULT 1 ): the form -
-    //  2 heating
-    //  term dt ( eta_o |J|^2 + eta_a |J_perp|^2 ). 0 = the
-    //  measured
-    //  field - energy change alone ( a diagnostic A/B ).
+    //  [nonideal] mg_cc_ene_heat ( DEFAULT 1 ): the form-2
+    //  heating term dt ( eta_o |J|^2 + eta_a |J_perp|^2 ).
+    //  0 = the measured field - energy change alone.
     int                 ene_heat{ 1 };
     type::float_t  *    p_dt_dif { nullptr };
-    //  The explicit / split chain's boundary - edge rule
-    //  ( mirrors the MG side's  mg_cc_bc ):  0 = legacy
-    //  one - sided ( free ),  1 = essential ( E_t = 0 on
-    //  boundary - plane edges ),  2 = pseudo - vacuum ( the
-    //  in - formula antisymmetric closure ).
+    //  The explicit / split chain's boundary - edge rule:
+    //  0 = free  ( one - sided ),  1 = essential  ( E_t = 0
+    //  on boundary - plane edges ),  2 = pseudo - vacuum
+    //  ( the in - formula antisymmetric closure ).
     int                 bc_edge { 0 };
-        //  Stage H2:  the whistler cap;
-        //  see implicit-nonideal-mg-method.md
-        //  ( H2 ), §7.74.
+    //  Whistler-cap coefficients:  hall_chyp weights the
+    //  fourth - order hyper - resistivity,  hall_upw the
+    //  upwind Hall bias ( 0 = off ).
     type::float_t       hall_chyp { 0.05 };
     type::float_t       hall_upw  { 0 };
     //  The face-centered Laplacian implicit solver (
     // mode=2; implicit.h --  the operations live in
     // implicit_t ).
     implicit_t<>        imp;
-    //  The edge-centred implicit tensor-diffusion leg
-    //  ( docs/mhd/nonideal/edge-mg-foundations.md ):  its
+    //  The edge-centred implicit tensor-diffusion leg:  its
     //  device code lives in edge_mg/edge_mg.cpp,  so this
     //  member costs the pgen TU nothing but a few bytes.
     edge_mg::solver_t   ee_s;
@@ -1131,53 +1090,37 @@ struct ni_t : base_T
         super_t::init( args, mod );
         eta_p.read( args );
         on = eta_p.on;
-        //  T3 (2026-10-28,  S0 of docs/mhd/nonideal/
-        //  HANDOVER-EDGE-MG-PORT.md 2.3 ).   The implicit
-        //  curl - curl leg was REMOVED and archived in
-        //  backup/nonideal-retired-2026-10-28/ .
-        //
-        //  Both keys below used to steer that leg. Now they
-        //  can only make the surviving explicit leg do the
-        //  WRONG thing silently:
-        //  mg_cc > 0 -- asked for a module that is not
-        //                     there any more ( the old code
-        //  would simply not have run it );
-        //    mg_cc_eta_var --  was how that module took
-        //  OWNERSHIP of eta, switching the
-        //                     explicit sweep OFF.  With the
-        //  owner gone, "off" means NOBODY
-        //                     supplies eta  ( the old
-        //  `on = false;` here did exactly
-        //  that: run13's B_phi blowing up
-        //  x1e33 was the same failure from
-        //                     the other side ).
+        //  The implicit curl - curl leg is not instantiated.
+        //  Both keys below can now only make the surviving
+        //  explicit leg do the WRONG thing silently:
+        //  mg_cc > 0 asks for a module that does not exist,
+        //  and mg_cc_eta_var was how that module took
+        //  ownership of eta  ( switching the explicit sweep
+        //  off,  so nobody supplies eta ).
         //  So: refuse,  and say what to do instead.
         if( args.get< int >( "nonideal", "mg_cc", 0 ) > 0 )
             throw std::runtime_error
-            ( "mhd_ee::ni:  [nonideal] mg_cc > 0 --  the implicit"
-              " curl-curl MG leg was REMOVED on 2026-10-28"
-              " ( docs/mhd/nonideal/HANDOVER-EDGE-MG-PORT.md 2.3;"
-              " code in backup/nonideal-retired-2026-10-28/ )."
+            ( "mhd_ee::ni:  [nonideal] mg_cc > 0 --  this build has no"
+              " implicit curl - curl MG leg,  so the key would be"
+              " silently ignored."
               "  Set mg_cc = 0 and use the explicit coupled leg"
-              " ( mode = 0 ),  or turn non-ideal off.  If you are"
-              " resurrecting the implicit leg,  read that document"
-              " first:  it is not coming back as it was." );
+              " ( mode = 0 ),  the edge-centred implicit step"
+              " ( ee_method = 5 ),  or turn non-ideal off." );
         if( args.get< int >( "nonideal", "mg_cc_eta_var", 0 ) )
             throw std::runtime_error
             ( "mhd_ee::ni:  [nonideal] mg_cc_eta_var = 1 was how the"
-              " REMOVED implicit leg took ownership of eta.  With it gone"
-              " nobody supplies eta --  set mg_cc_eta_var = 0 and put the"
-              " diffusivity back into eta_o / eta_a ( or the prof_* pars )." );
+              " implicit leg took ownership of eta;  that leg is not"
+              " instantiated,  so nobody would supply eta --  set"
+              " mg_cc_eta_var = 0 and put the diffusivity back into"
+              " eta_o / eta_a ( or the prof_* pars )." );
         mode = args.get< int >( "nonideal", "mode", 0 );
-        //  Edge-centred implicit tensor diffusion ( the new
-        //  leg ). See edge-mg-foundations.md section 4: eta
-        //  is the SYMMETRIC diffusivity,  so the Hall term
-        //  has no home here and must not be silently
-        //  dropped -- refuse instead. The built-in
-        //  providers
-        //  read eta_h / hall_l from the par;  disk_eta sets
-        //  eh = 0 unconditionally,  which this check cannot
-        //  see but which is by construction Hall-free.
+        //  Edge-centred implicit tensor diffusion:  eta is the
+        //  SYMMETRIC diffusivity,  so the Hall term has no home
+        //  here and must not be silently dropped -- refuse
+        //  instead.  The built-in providers read eta_h / hall_l
+        //  from the par;  disk_eta sets eh = 0 unconditionally,
+        //  which this check cannot see but which is by
+        //  construction Hall-free.
         ee_s.read( args );
         if( ee_s.par.enable )
         {
@@ -1224,34 +1167,26 @@ struct ni_t : base_T
         if( ene_dep == 1 )
             throw std::runtime_error
             ( "mhd_ee::ni:  mg_cc_ene = 1 ( the Poynting - flux"
-              " deposit ) was RETIRED 2026-10-25 ( three defects,"
-              " 84x .. 1.6e4x too small on the polar rings );  archived"
-              " in backup/nonideal-retired-2026-10-25/.  Use 2 ( the"
-              " verified default ) or 3 ( implicit leg only )." );
+              " deposit ) is not available in this build:  the"
+              " deposit is the metric - free measured form"
+              " ( mg_cc_ene = 2,  the default )."
+              "  Set mg_cc_ene = 2,  or 0 to turn the deposit off." );
         if( ene_dep < 0 || ene_dep > 3 )
             throw std::runtime_error
             ( "mhd_ee::ni:  mg_cc_ene must be 0 ( off ), 2"
               " ( the metric - free measured form,  default ) or 3"
               " ( the SBP face - flux form,  implicit leg only )." );
         //  [nonideal] mg_cc_ene = 3 ( the SBP face - flux
-        //  form, route II ) is
-        //  implemented on the IMPLICIT ( mg_cc ) leg only.
-        //  Both legs are
-        //  normally enrolled together and both read this
-        //  key, so when
-        //  mg_cc is on the explicit leg must leave the
-        //  deposit to the
-        //  implicit one ( NOT a silent fallback: it checks
-        //  the key that
-        //  enrolls the owner ). With mg_cc off there is no
-        //  owner -- refuse.
+        //  form ) is implemented on the implicit curl - curl
+        //  leg only,  which is not instantiated here,  so there
+        //  is no owner to take the deposit -- refuse rather than
+        //  silently falling back to form 2.
         if( ene_dep == 3 )
             throw std::runtime_error
             ( "mhd_ee::ni:  mg_cc_ene = 3 ( the SBP face - flux form )"
-              " lived on the implicit curl-curl leg, which was REMOVED"
-              " 2026-10-28 ( HANDOVER-EDGE-MG-PORT.md 2.3; code in"
-              " backup/nonideal-retired-2026-10-28/ )."
-              "  Use mg_cc_ene = 2 ( the verified measured form )." );
+              " is implemented only on the implicit curl - curl leg,"
+              " which this build does not instantiate."
+              "  Use mg_cc_ene = 2 ( the measured form,  default )." );
         ene_heat = args.get< int >
             ( "nonideal", "mg_cc_ene_heat", 1 );
         bc_edge = args.get< int >
@@ -1262,8 +1197,8 @@ struct ni_t : base_T
             ( "nonideal", "hall_upw", 0 );
         if( bc_edge < 0 || bc_edge > 2 )
             throw std::runtime_error
-            ( "mhd_ee::ni:  bc_edge must be  0  ( legacy"
-              " free ),  1  ( essential )  or  2  ( pseudo-"
+            ( "mhd_ee::ni:  bc_edge must be  0  ( free"
+              " one - sided ),  1  ( essential )  or  2  ( pseudo-"
               "vacuum )." );
         if( sts )
         {
@@ -1277,15 +1212,11 @@ struct ni_t : base_T
             dynamics::mhd::fld_t::need_ni = true;
         if( mode == 2 )
         {
-            //  Implicit solve: red-black Gauss-Seidel on
-            //  the
-            //  face-centered Laplacian ( implicit.h
-            //  ::solve,
-            // which names this scalar  p_res --  a residual
-            //  reduction buffer, NOT a CG dot-product one
-            //  ).
-            // The unknown is  cg_x,  a legacy name from the
-            //  retired CG prototype; the RHS is bf slice 0.
+            //  Implicit solve:  red-black Gauss-Seidel on the
+            //  face-centered Laplacian ( implicit.h::solve ),
+            //  which names this scalar  p_res --  a residual
+            //  reduction buffer, NOT a CG dot-product one.
+            //  The unknown is  cg_x;  the RHS is bf slice 0.
             dynamics::mhd::fld_t::need_ni_imp = true;
             if( ! p_dt_dif )
                 p_dt_dif
@@ -1315,9 +1246,9 @@ struct ni_t : base_T
         //  Coupled mode only;  split mode uses diffuse().
         if( ! on || mode != 0 )
             return;
-        //  ni_cur_k reads the  bf  ghost shell --
-        //  see the race note in
-        //  see implicit-nonideal-mg-method.md.
+        //  ni_cur_k reads the bf ghost shell,  so the edge
+        //  exchange must have completed:  sync all streams
+        //  before launching it.
         const_cast< device::base_t & >( dev )
             .sync_all_streams(  );
         const auto res = this->field_res( b_d );
@@ -1351,25 +1282,23 @@ struct ni_t : base_T
     };
 
     ////////// Godunov-split diffusion sweep //////////
-    //  Run once per cycle,  after the ideal RK2 step (
-    //  invoked from the pgen's module step --  usr.cpp
-    //  mhd_ni_t::step casts p_itg to the typed ni_t;  the
-    //  core integrator carries no hook,  Stage W3 ).  It
-    //  uses the ee buffer as the standalone diffusion-emf
-    //  working array and reuses the act_flx edge
-    //  exchange,  so dynamics.h is untouched.  The ideal
-    //  RK2 leaves the post-step state in slice 0;  the
-    //  sweep updates that slice.   No per-block sync is
+    //  Run once per cycle,  after the ideal RK2 step,  and
+    //  invoked from the pgen's module step --  the core
+    //  integrator carries no hook.  It uses the ee buffer as
+    //  the standalone diffusion-emf working array and reuses
+    //  the act_flx edge exchange,  so dynamics.h is untouched.
+    //  The ideal RK2 leaves the post-step state in slice 0;
+    //  the sweep updates that slice.   No per-block sync is
     //  needed:  this is a separate phase,  fully ordered
-    //  against the ideal step by the act_bnd / act_flx
-    //  event machinery it reuses.
+    //  against the ideal step by the act_bnd / act_flx event
+    //  machinery it reuses.
     __host__ void diffuse
     ( mesh::mesh_t & mesh, ::dynamics::base_t & mod )
     {
         if( ! on )
             return;
         //  One dt for the whole sweep.  ee_dt > 0 is the
-        //  A/B override:  it lets the implicit edge leg run
+        //  Forced-dt override:  it lets the implicit edge leg run
         //  at the same large dt as STS,  instead of the
         //  parabolic cap that ni_eos_t applies.
         const type::float_t dt_use
@@ -1450,11 +1379,10 @@ struct ni_t : base_T
             return;
         if( sts )
         {
-            //  The RKC combine/roll still skips a >= n_dim
-            //  ( STATUS 1a item 4 ),  so a thin ( n_phi = 1
-            //  or any 2-D ) block would integrate B_phi
-            //  with the wrong stage weights.  Refuse
-            //  instead of returning a silently wrong
+            //  The RKC combine/roll still skips a >= n_dim,
+            //  so a thin ( n_phi = 1 or any 2-D ) block would
+            //  integrate B_phi with the wrong stage weights.
+            //  Refuse instead of returning a silently wrong
             //  reference.
             for( auto & d : mod )
             {
@@ -1464,8 +1392,7 @@ struct ni_t : base_T
                     throw std::runtime_error
                     ( "mhd_ee::ni:  sts = 1 is 3-D only;"
                       "  the RKC combine/roll does not"
-                      " cover the thin-axis components yet"
-                      "  ( STATUS 1a item 4 )." );
+                      " cover the thin-axis components yet." );
                 }
             }
         }
@@ -1518,9 +1445,9 @@ struct ni_t : base_T
             type::float_t dt_dif;
             dev.cp( & dt_dif, p_dt_dif, 1 );
             mesh.p_com->reduce_all( dt_dif, comm::min );
-            //  Super - time - stepping  (  RKC1  ):
-            //  see implicit-nonideal-mg-method.md
-            //  § time - stepping;
+            //  Super - time - stepping  (  RKC1 ):  s is the
+            //  number of damped sub-steps,  sized from the
+            //  ratio  dt_use / dt_dif.
             const float_t ratio ( ( float_t ) dt_use
                                  / ( float_t ) dt_dif );
             s = ratio > 1.0 ? ( int ) std::ceil
@@ -1658,7 +1585,7 @@ struct ni_eos_t : dynamics::mhd::eos::adiabatic_t
     // the cap is relaxed when mode == 2.
     bool    sts { false };
     bool    imp { false };
-    //  ee_enable + ee_dt > 0 is the forced-dt A/B:  the
+    //  ee_enable + ee_dt > 0 forces the dt:  the
     //  implicit edge solve gets the dt it was asked for,
     //  not the parabolic cap.
     bool          ee_on { false };
@@ -1674,14 +1601,9 @@ struct ni_eos_t : dynamics::mhd::eos::adiabatic_t
               ( "nonideal", "ee_enable", 0 ) != 0;
         ee_dt = args.get< type::float_t >
               ( "nonideal", "ee_dt", 0 );
-        //  Stage V1's " mg_cc is unconditionally stable,
-        //  relax
-        //  the Ohmic / ambipolar cap " clause is GONE with
-        //  the
-        //  implicit leg ( 2026-10-28 ). Do not re-add it:
-        //  it
-        //  would relax the cap for a solve that does not
-        //  exist.
+        //  No cap - relaxation clause here:  the implicit
+        //  curl - curl leg that would have needed one is not
+        //  instantiated in this build.
         return;
     };
 
@@ -1694,11 +1616,10 @@ struct ni_eos_t : dynamics::mhd::eos::adiabatic_t
         const super_t & sup = * this;
         auto res = sup.dt( v_p, bc_2, b_m, gamma,
                            i, b_d );
-        //  ee_dt is the A/B override:  the cycle dt and
-        //  the diffusion dt must be the same number,  so
-        //  return it here as well ( not just in
-        //  ni_t::diffuse ).  The caller owns the ideal
-        //  CFL when it forces this.
+        //  ee_dt is the forced-dt override:  the cycle dt and
+        //  the diffusion dt must be the same number,  so return
+        //  it here as well ( not just in ni_t::diffuse ).  The
+        //  caller owns the ideal CFL when it forces this.
         if( ( ee_on || sts ) && ee_dt > 0 )
             return f_T( ee_dt );
         if( ! eta_p.on )
@@ -1710,11 +1631,7 @@ struct ni_eos_t : dynamics::mhd::eos::adiabatic_t
         for( int a = 1; a < geo.n_dim; ++ a )
             d = __min1( d, geo.dx_cfl( a, i ) );
         const f_T fac_oa = f_T( 0.5 ) / geo.n_dim;
-        //  Stage H2:  the whistler cap
-        //  tightens here.
-        //  see implicit-nonideal-mg-method.md
-        //  ( H2 );
-        //  chronicle §7.74.
+        //  The whistler cap tightens the parabolic limit here.
         const f_T fac_h  = f_T( 0.05 );
         if( ! sts && ! imp
             && !( ee_on && ee_dt > 0 )

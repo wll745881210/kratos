@@ -9,8 +9,7 @@ namespace interm
 {
 ////////////////////////////////////////////////////////////
 //  The polar - cone toroidal - field bath.
-//  scratch/ppd_tst/handover/ppd-polar-ic-2026-10-18.md
-//  ( sec. 7 ):  the cone  sin( th ) < s_th  fills with gas
+//  The cone  sin( th ) < s_th  fills with gas
 //  and winds up a nearly PURE toroidal field
 //  ( B_phi / |B| ~ 0.99,  v_A -> 200 ),  which sets the
 //  global ideal CFL and stalls the run.  The bath caps
@@ -20,7 +19,7 @@ namespace interm
 //  removed magnetic energy turns into heat by itself  (
 //  the EOS subtracts  |bf|^2 / 2  from the total energy ).
 //
-//  L3:  a non - finite cell is repaired from the nearest
+//  A non - finite cell is repaired from the nearest
 //  finite theta neighbour,  so one bad cell can no longer
 //  poison the implicit multigrid  ( its 1e30 sentinel ).
 
@@ -211,9 +210,8 @@ __global__ void funnel_bath_k
     }
     //  The bath is a SINK:  the removed magnetic energy
     //  leaves the total energy too.  Left in  ene  it would
-    //  heat the cone  ( measured:  45x its own thermal
-    //  energy over 500 steps ),  raising  c_s  and defeating
-    //  the very CFL the bath is there to protect.
+    //  heat the cone,  raising  c_s  and defeating the very
+    //  CFL the bath is there to protect.
     const auto d_b2( type::float2_t
         ( b_old * b_old - bf[ 2 ] * bf[ 2 ] ) );
     u[ idx::ene ] -= type::float_t( 0.5 * d_b2 );

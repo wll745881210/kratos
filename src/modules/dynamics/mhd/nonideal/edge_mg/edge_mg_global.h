@@ -9,21 +9,17 @@
 ////////////////////////////////////////////////////////////
 //  FROM PER-CELL BLOCKS TO THE BLOCK OPERATOR.
 //
-//  One implementation.  Until now every gate wrote this
-//  triplet loop in its own file ( gate_eta,  gate_mg,
-//  gate_v4 ),  which is how "the operator" and "what a gate
-//  measures" drift apart -- and the operator is the thing
-//  every claim in this line is about.
+//  One implementation,  so that every consumer assembles the
+//  same operator:  scattered copies drift apart,  and the
+//  operator is the thing every claim is about.
 //
 //  A is assembled in the SAME pass as M1 and K, so the
 //  three
 //  share their sparsity BY CONSTRUCTION. That is what makes
 //      A = M1 + dt K
 //  a fact rather than an assumption: the MG forms its S the
-//  same way ( edge_mg_mg.h, setup: `S.val += dt * K.val`
-//  over
-//  the same pattern ),  and the two are gated against each
-//  other on the compact numbering.
+//  same way (`S.val += dt * K.val` over the same pattern),
+//  and the two are compared on the compact numbering.
 //
 //  THE NUMBERING IS THE CALLER'S,  AND THERE ARE TWO:
 //
@@ -35,15 +31,12 @@
 //                      vector.
 //
 //  drop_t::identity they stay in the matrix with a 1 on the
-//  diagonal ( what Python's _zero_rows does,
-//  and what the gates use ). The raw edge
-//                      numbering is kept.
+//  diagonal. The raw edge numbering is kept.
 //
 //  In BOTH cases the RIGHT-HAND SIDE must follow: a dropped
 //  DOF is not a degree of freedom, and nothing may drive it
-//  ( dead-ends M56 -- the identity row alone reads a = f +
-//  l,
-//  because the source and the load still scatter into it ).
+//  ( the identity row alone reads a = f + l, because the
+//  source and the load still scatter into it ).
 //  `reduce_rhs` / `expand_sol` below are that rule,  in one
 //  place,  for both policies.
 
@@ -58,14 +51,13 @@ enum class drop_t : int
     identity = 1,
     //  RAW: no filter, no identity rows, the raw edge
     //  numbering. This is
-    //  what mg_t::build() expects -- it owns the compaction
+    //  what the hierarchy builder expects -- it owns the compaction
     //  and MUST NOT be
     //  handed an already compact matrix, because with no
     //  poles the two
     //  sizes are equal and it would compact the compact one
     //  through `comp`,
-    //  a permutation, i.e. index garbage ( it segfaulted
-    //  exactly there ).
+    //  a permutation, i.e. index garbage.
     raw      = 2,
 };
 
@@ -87,8 +79,7 @@ __host__ void assemble_m1k_a
 //  numbering the operator
 //  uses, with the dropped entries REMOVED ( compact ) or
 //  ZEROED
-//  ( identity ). This is the production form of dead-ends
-//  M56.
+//  ( identity ).
 __host__ void reduce_rhs
 ( const int & n_edge, const std::vector< int > & keep,
   const std::vector< int > & comp, const drop_t & mode,

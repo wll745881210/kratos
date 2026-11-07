@@ -20,14 +20,12 @@ void dual_t::setup(  )
     lvl_0 = b_w.get(  ) . reg.level ;
     mesh::block::dual_t ::setup(   );
     const auto & geo_h( b_w.get(   ). geo );
-    //  Only THINNABLE axes count.   An axis with <= 2 cells
-    //  is a thin / axisymmetric direction:  halving 2 -> 1
-    //  costs the whole multigrid ( n_lvl = 1 + log2(2.5) = 2
-    //  leaves  lvl_lim = 0 ),  and halving 1 -> 1 is a
-    //  no-op whose n_min = 1 makes  lvl_lim = -1  ( the
-    //  n_phi = 1  non - ideal crash,  2026-10-21 ).   A
-    //  genuinely 2D grid ( every axis <= 2 ) keeps the old
-    //  formula.
+    //  Only THINNABLE axes count.  An axis with <= 2 cells is
+    //  a thin / axisymmetric direction:  halving 2 -> 1 costs
+    //  the whole multigrid ( n_lvl = 1 + log2(2.5) = 2 leaves
+    //  lvl_lim = 0 ),  and halving 1 -> 1 is a no-op whose
+    //  n_min = 1 makes lvl_lim = -1.  A grid with every axis
+    //  <= 2 falls back to the plain min.
     int  n_min( 1 << 30 );
     for( int a = 0; a < geo_h.n_dim; ++ a )
         if( geo_h.n_ceff[ a ] > 2 )

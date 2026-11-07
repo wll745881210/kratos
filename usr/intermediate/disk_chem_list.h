@@ -7,9 +7,8 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  The PPD reaction list ( usr_ext / ppd / design.md
-//  decision 5,  ledger cont. 43, 45, 46 ):  the extension
-//  ( chem_therm ) list,  with
+//  The PPD reaction list:  the extension ( chem_therm )
+//  list,  with
 //  ( a ) the dust temperature from the disk_dust_t provider
 //      instead of the radiation flux ( prep_dev override;
 //      prep_dev is non - virtual but the solver dispatches
@@ -30,9 +29,8 @@ namespace interm
 //  members live in registers,  NOT shared memory ):
 //  d.T_dust must be written by ALL threads redundantly.
 //  A single - thread write + __syncthreads leaves the other
-//  threads' copies at the base value ( measured 2026-10-13:
-//  the dust reaction,  dispatched to thread 1,  then saw
-//  T_dust = T_eq = 1 and cooled the disk to the floor  ).
+//  threads' copies at the base value:  the dust reaction sees
+//  T_dust = T_eq = 1 and cools the disk to the floor.
 //  ***
 //
 //  The base init_phot_reac leaves n_hv / hv_erg
@@ -67,15 +65,13 @@ struct ppd_list_t : extension::chemistry::list_t
         //  init_extra BEFORE the base init:  the core
         //  std_t::init returns early when no reaction_file
         //  is given,  skipping init_extra ( n_cool / i_elec
-        //  / T_eq / fac_dust_stiff would stay garbage --
-        //  measured 2026-10-13:  a negative shared - memory
-        //  request ).   init_extra is idempotent for the
-        //  scalar settings,  and n_cool is a COUNTER
-        //  incremented by init_mol / atom_cool later in the
-        //  base init --  so it must run FIRST,  never after
-        //  ( measured 2026-10-14:  re - running it after
-        //  the base init wiped n_cool,  leaving the cooling
-        //  interpolators uninitialized while dispatched ).
+        //  / T_eq / fac_dust_stiff would stay garbage ).   And
+        //  init_extra is idempotent for the scalar settings but
+        //  n_cool is a COUNTER incremented by init_mol /
+        //  atom_cool later in the base init --  so it must run
+        //  FIRST:  re - running it after the base init wipes
+        //  n_cool and leaves the cooling interpolators
+        //  uninitialized while dispatched.
         init_extra( args, chem );
         super_t::init( args, chem );
         dust.read( args );
@@ -187,9 +183,8 @@ struct ppd_list_t : extension::chemistry::list_t
         //  T_dust from the provider,  NOT from the
         //  radiation flux.   d is PER - THREAD ( registers,
         //  not shared memory ):  EVERY thread evaluates --
-        //  a single - thread write + __syncthreads leaves
-        //  the other threads at the base value ( ledger
-        //  cont. 46 ).
+        //  a single - thread write + __syncthreads would
+        //  leave the other threads at the base value.
         d.T_dust = dust.eval( b_d, d.idx );
         //  The T clamp ( WBG19 regular_temp ):  d.y is in
         //  SHARED memory --  single - thread write + sync;

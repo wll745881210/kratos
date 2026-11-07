@@ -8,23 +8,18 @@
 #include <vector>
 
 ////////////////////////////////////////////////////////////
-//  Minimal host linear algebra for the gates:  a CSR matrix
-//  built from ( row, col, value ) triplets, its matvec, and
-//  a Jacobi-preconditioned conjugate gradient.
+//  Minimal host linear algebra:  a CSR matrix built from
+//  ( row, col, value ) triplets, its matvec, and a
+//  Jacobi-preconditioned conjugate gradient.
 //
-//  Why CG and not an LU factorisation:  the A-gates run at
-//  PRECISION=2, where a converged CG IS a reference
-//  solution
-//  ( rtol 1e-13 ), and it scales -- dense LU does not
-//  survive
-//  10^4 DOFs and this tree has no sparse direct solver.  A5
-//  later compares the MG preconditioner against THIS, so
-//  the
-//  gate always prints the true final residual and it can be
-//  checked.
+//  Why CG and not an LU factorisation:  at PRECISION=2 a
+//  converged CG IS a reference solution ( rtol 1e-13 ), and
+//  it scales -- dense LU does not survive 10^4 DOFs and this
+//  tree has no sparse direct solver.  The solver prints the
+//  true final residual so it can be checked.
 //
-//  Host-only,  no device code:  the gate TUs stay at a few
-//  lines of PTX ( rule C1 of edge-mg-foundations.md ).
+//  Host-only,  no device code:  nothing here is compiled into
+//  a kernel.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -40,18 +35,13 @@ struct csr_t
 {
     int                   n;
     //  The COLUMN count. A square operator has ncol == n,
-    //  but G
-    //  ( edges x nodes ) and C ( edges x faces ) are
-    //  rectangular, and
-    //  a Galerkin product needs the COLUMN count of the
-    //  transfer. Not
-    //  tracking it built Sg as n_edge x n_edge instead of
-    //  n_node^2 and
-    //  Sa as n_edge x n_edge instead of n_face^2, i.e. both
-    //  auxiliary
-    //  spaces were mostly empty rows and contributed almost
-    //  nothing
-    //  ( found 2026-10-29 ).
+    //  but G ( edges x nodes ) and C ( edges x faces ) are
+    //  rectangular, and a Galerkin product needs the COLUMN
+    //  count of the transfer. Not tracking it sizes the
+    //  auxiliary spaces wrong ( Sg as n_edge x n_edge instead
+    //  of n_node^2, Sa as n_edge x n_edge instead of
+    //  n_face^2 ), so they are mostly empty rows and
+    //  contribute almost nothing.
     int                ncol;
     std::vector< int   >  ptr;   // n + 1
     std::vector< int   >  idx;
@@ -229,12 +219,9 @@ inline std::vector< int > diag_pos( const csr_t & M )
 };
 
 //  add sh to the diagonal of every row, INSERTING the entry
-//  where the
-//  pattern has none. The auxiliary operators come from G
-//  and C, which
-//  leave whole rows empty, and a missing diagonal is what
-//  made the first
-//  IC(0) produce infinite factors ( 2026-10-29 ).
+//  where the pattern has none. The auxiliary operators come
+//  from G and C, which leave whole rows empty, and a missing
+//  diagonal makes IC(0) produce infinite factors.
 inline void add_diag( csr_t & M, const float_t & sh )
 {
     std::vector< int    > r, c;

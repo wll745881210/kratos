@@ -12,22 +12,17 @@
 
 ////////////////////////////////////////////////////////////
 //  The SCALAR ( float_t ) device-vector primitives.  They
-//  are separate from the multigrid ops of edge_mg_device.h
-//  for the reason recorded at 9z-n: a dot is a GLOBAL
-//  reduction, not a multigrid op.
+//  are separate from the multigrid ops of edge_mg_device.h:
+//  a dot is a GLOBAL reduction, not a multigrid op.
 //
 //  Why a second file instead of overloading the first one:
-//  `vec_t` is
-//  float2_t ( the complex E-field of the production leg ),
-//  and a solver
-//  vector is a plain float_t array. They cannot share a
-//  buffer type, and
-//  templating one on the other would put the complex
-//  arithmetic into every
-//  CG iteration. So the two layers are separate, and the
-//  REDUCTION SCHEME
-//  is deliberately identical -- the same fixed two-level
-//  tree:
+//  `vec_t` is float2_t ( the complex E-field of the production
+//  leg ),  and a solver vector is a plain float_t array. They
+//  cannot share a buffer type,  and templating one on the
+//  other would put the complex arithmetic into every CG
+//  iteration. So the two layers are separate,  and the
+//  REDUCTION SCHEME is deliberately identical -- the same
+//  fixed two-level tree:
 //
 //  stage 1 block b sums its own contiguous slice in index
 //  order,
@@ -35,13 +30,11 @@
 //  stage 2 the host sums p_part[ 0 .. n_blk-1 ] in index
 //  order
 //
-//  Determinism is a hard requirement ( 9z-d ): a Krylov
-//  iteration whose
-//  dot product can come out differently twice cannot be
-//  gated bitwise, and
-//  cannot be reproduced from a checkpoint. n_blk is a
-//  CONSTANT of the
-//  solve,  not a tuning knob,  for exactly that reason.
+//  Determinism is a hard requirement:  a Krylov iteration
+//  whose dot product can come out differently twice cannot be
+//  compared bitwise run to run,  and cannot be reproduced from
+//  a checkpoint. n_blk is a CONSTANT of the solve,  not a
+//  tuning knob,  for exactly that reason.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -174,7 +167,7 @@ struct real_dot_part_t
         const int i0 = b * chunk_len;
         //  NOT std::min: constexpr __host__ only, so nvcc
         //  refuses it from a
-        //  __device__ function ( foundations rule C9 )
+        //  __device__ function
         const int i1 = ( i0 + chunk_len < n ) ? ( i0 + chunk_len ) : n;
         float_t s( 0. );
         for( int i = i0; i < i1; ++ i )
@@ -218,7 +211,7 @@ struct real_sum_part_t
 //  The same two stages as `real_dot`,  but the scalar STAYS
 //  on the device:  no `f_cp`,  no sync,  and the partials are
 //  summed in the same order,  so the value is bit-identical
-//  to the old host-side finish.
+//  to `real_dot` on the same inputs.
 
 __host__ void real_dot_dev
 ( device::base_t & dev, const float_t * p_x, const float_t * p_y,
@@ -234,10 +227,9 @@ __host__ void real_dot_dev
 //  The SCALAR half of a CG iteration,  as one-thread ops on
 //  `real_one_k` ( so the host never computes in a step ).
 //
-//  They used to sit in `edge_mg_mf.h` next to the multigrid;
-//  they are generic --  b2 guard,  alpha with a curvature
-//  breakdown flag,  beta,  residual -- so they live here,  and
-//  both the matrix-free MG and the K6 face solve use them.
+//  Generic --  b2 guard,  alpha with a curvature breakdown
+//  flag,  beta,  residual -- and shared by the matrix-free MG
+//  and the face solve.
 //
 //  Every coefficient is read BY the vector kernels from the
 //  device,  so an update can never race the scalar that feeds

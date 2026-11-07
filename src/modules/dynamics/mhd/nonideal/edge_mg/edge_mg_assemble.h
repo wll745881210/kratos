@@ -6,12 +6,10 @@
 
 ////////////////////////////////////////////////////////////
 //  Per-cell local-block assembly,  weak form,  one
-//  implementation shared by the host gates and the device
+//  implementation shared by the host and the device
 //  kernels.
 //
-//  The local algebra is IDENTICAL to the certified Python
-//  reference ( proto/p8_sph2d.build_geo,  which is itself
-//  p8_assemble.build_local with an analytic Jacobian ):
+//  The local algebra,  with the analytic Jacobian:
 //
 //      phi_e   = J^{-T} h_e             ( covariant Piola )
 //      curl_e  = J h_c / det J
@@ -26,11 +24,10 @@
 //  and the local order
 //      ED = [ (a, sb, sl) for a in 0..2, sb, sl in 0..1 ]
 //      FD = [ (a, s)      for a in 0..2,  s in 0..1 ]
-//  so that a dump can be compared element by element with
-//  the Python side.
+//  so the edge and face dofs of a cell are ordered the same
+//  way by every assembler.
 //
-//  Accumulation is in float2_t ( docs/mhd/nonideal/
-//  edge-mg-foundations.md 4.1 );  the stored block is
+//  Accumulation is in float2_t;  the stored block is
 //  float_t.
 
 namespace mhd_ee::ni::edge_mg
@@ -39,8 +36,7 @@ using type::float_t;
 
 
 ////////////////////////////////////////////////////////////
-//  3-point Gauss-Legendre on [0,1]  ( leggauss(3) mapped,
-//  i.e. exactly what p8_assemble._gauss does ).
+//  3-point Gauss-Legendre on [0,1].
 //
 //  Written as functions,  not as a namespace-scope const
 //  array:  a host `static const` array is not readable in
@@ -108,17 +104,10 @@ __host__ __device__ inline void _inv3
 //  volume
 //  assembly,  the surface load and the volume load.
 //
-//  ONE implementation on purpose. All three integrals must
-//  use the
-//  same quadrature, the same analytic Jacobian and the same
-//  basis
-//  functions; a second copy is exactly where the M43 sign
-//  flip and
-//  the M12 x12 lived. Extracted from assemble_cell in
-//  2026-10-30
-//  (when the volume load landed), with every existing gate
-//  required
-//  to be BIT-IDENTICAL afterwards.
+//  ONE implementation on purpose:  the volume assembly,  the
+//  surface load and the volume load must share the same
+//  quadrature,  the analytic Jacobian and the basis
+//  functions;  a second copy is where a sign flip hides.
 //
 //      x     the physical point
 //      J     dx/dxi  ( already span-scaled by the policy )
@@ -210,29 +199,18 @@ __host__ __device__ inline void basis_at
 //  One cell
 
 //  eta may also be given as a FIRST-ORDER TAYLOR expansion
-//  about the cell
-//  centre: eta(x) = eta_c + (d eta / d x_a) (x - x_c)_a.
-//  That is what makes a
-//  spatially varying eta second order rather than first (
-//  see
-//  docs/mhd/nonideal/HANDOVER-ETA-SUBCELL.md ): with ONE
-//  constant tensor per
-//  cell the K error is O(h) because curl phi_e flips sign
-//  across the six face
-//  patches of a cell, so the linear part of (eta - eta_h)
-//  does NOT integrate
-//  away. The gradient is NOT stored -- the caller derives
-//  it from a neighbour
-//  stencil of the 6-component lattice, so the storage stays
-//  6 numbers a cell.
+//  about the cell centre: eta(x) = eta_c + (d eta / d x_a) (x - x_c)_a.
+//  With ONE constant tensor per cell the K error is O(h):
+//  curl phi_e flips sign across the six face patches of a
+//  cell,  so the linear part of (eta - eta_h) does NOT
+//  integrate away.  The gradient is NOT stored -- the caller
+//  derives it from a neighbour stencil of the 6-component
+//  lattice,  so the storage stays 6 numbers a cell.
 //
 //  p_deta is 3 x 6: [a][q] = d eta_q / d x_a, with q in the
-//  module's Voigt
-//  order (xx, yy, zz, xy, xz, yz) and a the CARTESIAN
-//  index. p_deta == nullptr
-//  reproduces exactly the constant-tensor path ( and every
-//  existing gate is
-//  required to stay BIT-IDENTICAL ).
+//  module's Voigt order (xx, yy, zz, xy, xz, yz) and a the
+//  CARTESIAN index.  p_deta == nullptr reproduces exactly the
+//  constant-tensor path.
 
 template< class geo_T >
 __host__ __device__ void assemble_cell
@@ -329,9 +307,7 @@ __host__ __device__ void assemble_cell
                     //  OUTSIDE
                     //  the e2 loop ( inside it, every entry
                     //  was added
-                    //  12 times -- a x12 that A1/A4 could
-                    //  not see,
-                    //  because they never touch M12 ).
+                    //  12 times ).
                     for( int f = 0; f < 6; ++ f )
                     {
                         float2_t sm( 0 );

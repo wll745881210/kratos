@@ -32,14 +32,15 @@ struct fld_t
     //  mesh generation, hence before any setup( ) ).
     dat_3d_t<  f_t > e_dif;
     dat_3d_t<  f_t > j_edge;  // currents on the ee lattice
-    //  P2b-2 ( 2026-10-27 ):  the edge operator s per - edge diagonal
-    //  1 + dt eta |( C2 C1 1 )_e|,  for the diagonal - preconditioned
-    //  Richardson.  Same lattice as e_dif / j_edge.
+    //  The edge operator's per - edge diagonal
+    //  1 + dt eta |( C2 C1 1 )_e|,  for the diagonal -
+    //  preconditioned Richardson.  Same lattice as e_dif /
+    //  j_edge.
     dat_3d_t<  f_t > e_diag;
-    //  P2c ( 2026-10-27 ):  the HX/AMS auxiliary space -- NODAL
-    //  ( corner ) arrays on the same box as e_dif:
-    //  nod_w = G_inc^T b ( the auxiliary right - hand side ),
-    //  nod_p = the nodal potential being solved for.
+    //  The HX/AMS auxiliary space -- NODAL ( corner ) arrays on
+    //  the same box as e_dif:  nod_w = G_inc^T b ( the
+    //  auxiliary right - hand side ),  nod_p = the nodal
+    //  potential being solved for.
     dat_3d_t<  f_t > nod_w, nod_p;
     dat_3d_t<  f_t > heat;
     //  The STS sweep's RKC recursion:  B_{ j - 2 }  storage
@@ -50,16 +51,12 @@ struct fld_t
     //  single slice ).   Allocated only for the implicit
     //  nonideal mode ( implicit.h ).
     dat_3d_t< f2_t > cg_x;
-    //  Divergence - projection scratch  ( [nonideal] mg_cc_proj,
-    //  the Step - B projection of  docs/mhd/nonideal/
-    //  emf-unknown-route-plan.md  sec. 3quater ):  the potential
-    //  and its Jacobi partner,  plus the face - flux imbalance
+    //  Divergence - projection scratch:  the potential and its
+    //  Jacobi partner,  plus the face - flux imbalance
     //  S = V ( D.B )  the projection solves for.  All three are
-    //  float2_t ( the face field already is;  a float accumulator
-    //  is what limited the 2.5D probe comparison to 0.17% ) and
-    //  they carry NO ghost ring -- mg_cc_lam treats an out - of -
-    //  mesh potential as 0 ( Dirichlet ) and the curvilinear phi
-    //  axis as periodic.
+    //  float2_t ( the face field already is ) and they carry NO
+    //  ghost ring -- an out - of - mesh potential is 0 (
+    //  Dirichlet ) and the curvilinear phi axis is periodic.
     dat_3d_t< f2_t > phi;
     dat_3d_t< f2_t > prhs;
     //  Edge-centred implicit tensor diffusion

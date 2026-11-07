@@ -17,8 +17,7 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  Central - star photon - packet MCRT for the disk
-//  ( usr_ext / ppd / design.md sec. 5,  ledger cont. 44 ).
+//  Central - star photon - packet MCRT for the disk.
 //  Physics recipes follow WBG19 ( 4 bands:  7 / 12 / 25 eV
 //  and 3 keV );  the TRANSPORT is the photon - packet
 //  machinery of usr / extension / radiation ( the planet _
@@ -29,7 +28,7 @@ namespace interm
 //  storage of their own --  bdt_radalias_t ALIASES the MHD
 //  module's bdt_chem_t::rad ( allocated and sized there by
 //  the ppd block_yield wrapper ),  so the chemistry solver
-//  keeps reading its own block data exactly as in T7.   The
+//  keeps reading its own block data,  unchanged.   The
 //  transport proxy prx_rad_t sources hyd.u from the MHD
 //  module the same way ( planet's prx_t assumes a
 //  chemistry::hydro::base_t host,  which our MHD module is
@@ -42,7 +41,7 @@ using disk_pol_t  = extension::radiation::pool_t
 
 ////////////////////////////////////////////////////////////
 //  Pre - absorption shared state ( App A.3,  the LOCAL
-//  form --  the user's 2026-10-14 direction ):  the inner -
+//  form ):  the inner -
 //  shell column is estimated from the r_in - adjacent cells'
 //  CURRENT state ( no radial reduction,  no cross - step
 //  memory ):  tau_pre,band = mfpa_band( r_in ) * r_in /
@@ -470,7 +469,7 @@ public:
     //  filled by chem_t::prep_rad inside the base step,  so
     //  without an explicit prep_rad here the very first
     //  injection would be completely unattenuated ( the
-    //  step - 0 flash,  ledger cont. 49 ).
+    //  step - 0 flash ).
     virtual void step( mesh::mesh_t & mesh ) override
     {
         if( preab.on )

@@ -8,7 +8,7 @@
 //  Geometry policies for the assembly.
 //
 //  A policy answers ONE question,  in the exact form the
-//  weak form needs ( spec section 3.2 ):
+//  weak form needs:
 //
 //      at cell i and local coordinate xi in [0,1]^3,
 //      give  x,  J = [ dx/dxi_0 | dx/dxi_1 | dx/dxi_2 ]
@@ -18,21 +18,17 @@
 //  The Jacobian must be ANALYTIC,  never a trilinear map of
 //  the eight corners:  on a sphere that map is a chord in
 //  every curved direction,  which is singular exactly where
-//  the sphere is special ( M39:  the boundary load came out
-//  25x too large at n_phi = 4, and det J = 0 at n_phi = 1
-//  ).
+//  the sphere is special -- det J = 0 at n_phi = 1,  and the
+//  boundary load is far too large at small n_phi.
 //
 //  Policies are plain POD structs and are passed to the
 //  kernels BY VALUE,  so no device-side pointer chasing and
 //  no virtual dispatch.
 //
-//  S0'-4 implements the cartesian one only.  The spherical
-//  policy ( mu = cos(theta) parameterisation,  spec section
-//  3.3 ) lands with S1 -- the interface below is already
-//  the
-//  one it needs,  and the assembly kernel is templated on
-//  the policy, so adding it costs one instantiation, not a
-//  rewrite.
+//  Only the cartesian policy is implemented here.  The
+//  spherical one ( mu = cos(theta) parameterisation ) needs
+//  only its own `map` / `node_x`,  because the assembly
+//  kernel is templated on the policy.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -64,19 +60,13 @@ using mesh::   geo_t;
 //  resolved cell, and far above the 1e-16 round-off of sin
 //  ).
 //
-//  TWO consumers, and they must never disagree:
-//  geo_sph_from writes the
-//  flags into the policy, and every cplx_t of a block takes
-//  them from
-//  pole_flags ( below ). A complex built WITHOUT them keeps
-//  the zero-length
-//  phi edges on the axis as ordinary degrees of freedom, so
-//  `M1 + dt K` is
-//  near singular there and the CG silently returns: the
-//  gate measured a
-//  non-converging rate 0.17 on the global mesh, against
-//  1.758 once the fold
-//  was on ( HANDOVER-ETA-CPP-DEBUG.md,  bug P1 ).
+//  TWO consumers,  and they must never disagree:
+//  geo_sph_from writes the flags into the policy,  and every
+//  cplx_t of a block takes them from pole_flags ( below ).  A
+//  complex built WITHOUT them keeps the zero-length phi edges
+//  on the axis as ordinary degrees of freedom,  so
+//  `M1 + dt K` is near singular there and the CG silently
+//  returns without converging.
 
 __host__ bool sph_is_axis( const float2_t & th );
 
@@ -119,13 +109,10 @@ struct geo_cart_t
         return;
     };
 
-    //  A NODE ( unwrapped ) to a point: the gates build
-    //  edge
-    //  vectors from it, and on a periodic axis the node
-    //  index
-    //  n_a is a real, distinct coordinate ( see the
-    //  wrapped-
-    //  edge bug in foundations 2.3 ).
+    //  A NODE ( unwrapped ) to a point: edge vectors are
+    //  built from it, and on a periodic axis the node index
+    //  n_a is a real, distinct coordinate,  so two nodes one
+    //  period apart are NOT the same point.
     __host__ __device__ void node_x
     ( const idx_t & nd, float2_t ( & x )[ 3 ] ) const
     {
@@ -142,8 +129,8 @@ struct geo_cart_t
 //  parametrised uniformly in  mu = cos( theta ),  NOT in
 //  theta.
 //
-//  This single choice is what makes the pole converge
-//  ( spec section 3.3 ):  with a theta parametrisation the
+//  This single choice is what makes the pole converge:
+//  with a theta parametrisation the
 //  polar cell's energy integrand is (d_theta w)^2 / sin
 //  theta
 //  with  d_theta w  constant,  i.e. ~ 1/theta -- a log
@@ -156,10 +143,8 @@ struct geo_cart_t
 //
 //  and no basis function carries a 1/sin(theta).
 //
-//  Measured on the Python side:  rate 1.00 -> 1.97/1.98.
-//  If the C++ side ever reports a rate near 1.0 on the
-//  global mesh, the first thing to check is that this
-//  policy -- not a theta-uniform one -- is the one running.
+//  A rate near 1.0 on the global mesh is the signature of a
+//  theta-uniform policy running instead of this one.
 
 struct geo_sph_t
 {
@@ -235,10 +220,9 @@ struct geo_sph_t
 //  Build the policy of one block from its geo_t.
 //
 //  Returns false ( and the caller reports which axis ) when
-//  the block is not a uniform cartesian box -- the
-//  stretched
-//  variant needs the x_fc table on the device and arrives
-//  with S1,  together with the spherical policy.
+//  the block is not a uniform cartesian box -- the stretched
+//  variant needs the x_fc table on the device and is not
+//  implemented yet.
 
 __host__ bool geo_cart_from
 ( const geo_t & geo, geo_cart_t & g );

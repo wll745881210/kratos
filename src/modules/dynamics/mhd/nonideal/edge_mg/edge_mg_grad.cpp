@@ -8,8 +8,8 @@
 //  `eta_grad_lat` turns the per-cell tensor lattice into a
 //  per-cell gradient contribution on the device ( it is a
 //  host driver around `eta_grad_k` ),  and `_d1_line` is the
-//  one-line reference the gates compare against.  The
-//  kernels and the `__device__` helpers stay in the header.
+//  one-line reference for the same stencil.  The kernels and
+//  the `__device__` helpers stay in the header.
 
 namespace mhd_ee::ni::edge_mg
 {

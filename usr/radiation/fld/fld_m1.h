@@ -9,7 +9,7 @@ namespace rad::fld
 ////////////////////////////////////////////////////////////
 //  The M1 flux rebuild:  F  from the solved  E  (  the
 // Schur - complement elimination backwards ).   The E
-// equation  (  scheme - comparison.md § 3.2 ):
+// equation:
 //      E - ∇·( D_t ∇E ) + sig E = rhs,
 //      D_t  = dt^2 c^2 chi / ( 1 + sig_t )
 // (  sig_t  the dt - scaled TOTAL extinction;  the M1
@@ -20,7 +20,7 @@ namespace rad::fld
 // frozen values )  and the centered  E  gradient  (  the
 // fld_op  dx  convention;  boundary faces use the  Robin
 // ghost  so the normal derivative carries the closure ).
-//  FLD - limit gate  (  the T3 unit test ):  chi = I / 3
+//  FLD - limit check:  chi = I / 3
 // recovers  F = - dt c^2 ∇E / ( 3 ( 1 + sig_t ) )  -- the
 // same face flux the  fld_op  stencil  transports.
 
@@ -159,8 +159,8 @@ struct m1_freeze_fun_t
             c6[ 3 ] = ca[ 1 ];   //  yy
             c6[ 5 ] = ca[ 2 ];   //  zz
         };
-        //  The EXACT Schur tensor  (  scheme-comparison
-        // md § 3.2 ):   D_t = dt^2 c^2 chi / ( 1 + sig ),
+        //  The EXACT Schur tensor:  D_t = dt^2 c^2 chi /
+        // ( 1 + sig ),  sig = dt c kappa rho  (  co[ 1 ],  the
         // sig = dt c kappa rho  (  co[ 1 ],  the scalar
         // freeze already wrote it ).   Thick limit
         // ( sig >> 1 )  ->  dt c chi / kappa rho  == the
@@ -182,8 +182,7 @@ struct m1_freeze_fun_t
 // cross terms  - dt c^2  d_a ( chi_ab d_b E )  with
 // a != b  are assembled EXPLICITLY from the current
 // iterate  and  subtracted from the solve's source
-// (  the Richardson defect - correction of the
-// implicit - nonideal - mg - method.md § 3.2 ):
+// (  the Richardson defect - correction ):
 //      A_base E = src - A_offdiag E^k
 // iterated to the fixed point  (  the driver's Picard
 // outer loop,  [fld] n_picard ).

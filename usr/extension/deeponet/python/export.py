@@ -28,6 +28,7 @@ import numpy as np
 import torch
 
 from model import StackedDeepONet
+import os
 
 MAGIC = b"DON1"
 
@@ -191,7 +192,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="pilot")
     ap.add_argument("--data", default="", help="dataset npz (default: dataset_<tag>.npz)")
-    ap.add_argument("--models", default="~/scratch/donet_tst/fid/models")
+    ap.add_argument("--models", default=os.path.join(
+        os.environ.get("KRATOS_DONET", "donet_tst/fid"), "models"))
     ap.add_argument("--T-lo", type=float, default=300.0)
     ap.add_argument("--T-hi", type=float, default=6e4)
     ap.add_argument("--dt", type=float, nargs=2, default=[1.0, 3600.0],

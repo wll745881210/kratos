@@ -27,6 +27,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model import StackedDeepONet  # noqa: E402
+import os
 
 FLOOR = 1e-30
 
@@ -220,9 +221,7 @@ def main():
     ap.add_argument("--out", default="")
     a = ap.parse_args()
 
-    models = Path(__file__).resolve().parent.parent.parent.parent \
-        / "scratch/donet_tst/fid/models"
-    models = Path.home() / "scratch/donet_tst/fid/models"
+    models = Path(os.environ.get("KRATOS_DONET", "donet_tst/fid")) / "models"
     ckpt = models / f"ckpt_{a.tag}.pt"
     stats = models / f"stats_{a.tag}.npz"
     net, st = load_net(ckpt, stats)

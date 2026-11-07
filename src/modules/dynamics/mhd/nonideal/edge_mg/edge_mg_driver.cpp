@@ -22,11 +22,9 @@
 //  first ( they are what a phase calls ),  then the phases
 //  in the order a step runs them,  then step( ) itself.
 //
-//  Method:  docs/mhd/nonideal/algorithm-spec-edge-implicit-
-//  diffusion.md.  Engineering constraints ( why this file
-//  and not the pgen,  why no template on the block data,
-//  why the eta tensor is data ):  docs/mhd/nonideal/
-//  edge-mg-foundations.md sections 3.3 and 4.1.
+//  Host-side only:  the eta tensor arrives as plain data and
+//  the complex is built here,  so the pgen TU instantiates no
+//  kernel of this module.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -36,16 +34,14 @@ namespace mhd_ee::ni::edge_mg
 
 //  Build the complex of a block WITH ITS POLE FLAGS.
 //
-//  Every cplx_t of a block goes through here ( P1 of
-//  docs/mhd/nonideal/HANDOVER-ETA-CPP-DEBUG.md ). The flags
-//  are a property of the GEOMETRY, not of the caller: a
-//  probe that built its own complex from the two-argument
-//  setup() silently disagreed with the assembler about
-//  where the axis is, so the zero-length phi edges on the
-//  pole ring stayed in the system as ordinary degrees of
-//  freedom and `M1 + dt K` was near singular there ( the
-//  gate measured a non-converging 0.17 against 1.758 once
-//  folded ). One entry point, so a new probe cannot forget.
+//  Every cplx_t of a block goes through here. The flags are a
+//  property of the GEOMETRY, not of the caller: a probe that
+//  built its own complex from the two-argument setup() would
+//  silently disagree with the assembler about where the axis
+//  is,  so the zero-length phi edges on the pole ring stay in
+//  the system as ordinary degrees of freedom and `M1 + dt K`
+//  is near singular there. One entry point,  so a new caller
+//  cannot forget.
 __host__ void driver_t::build_complex
 ( cplx_t & c, const mesh::geo_t & geo, const idx_t & n_ceff,
   const bool ( & per )[ 3 ] ) const
@@ -120,14 +116,9 @@ __host__ void driver_t::cells_dev_eta
 ////////////////////////////////////////////////////////////
 //  PRODUCTION M12:  the sparse product.
 //
-//  This is the operator `a_from_bf` needs.  It USED to be
-//  the gate's ref_rhs / ref_rhs_t.  P4.1 moved those
-//  definitions to edge_mg_ref.cpp ( and P4.2 rewrites them
-//  in closed form,  with the reference's OWN M12^T ),  so
-//  the production path must not call them any more.  The
-//  code is the same,  so the implicit step stays
-//  bit-identical:  the split is about OWNERSHIP,  not about
-//  the numbers.
+//  This is the operator `a_from_bf` needs,  applied cell by
+//  cell:  each cell scatters its 12x6 block onto the global
+//  edges.
 
 __host__ void driver_t::prod_rhs_m12
 ( const mesh::geo_t & geo, const idx_t & n_ceff,
@@ -168,8 +159,7 @@ __host__ void driver_t::prod_rhs_m12
     return;
 };
 
-//  A7.1 representation IN,  once when no edge state is
-//  available:
+//  Representation IN,  once when no edge state is available:
 //
 //      a <- M1^{-1} M12 b.
 //
@@ -270,32 +260,28 @@ __host__ float_t driver_t::a_from_bf
 //  ( 1 ) Level by level,  `A_l x` from the aggregated per-cell
 //  blocks must be `Sl[l] x` from the host Galerkin product the
 //  assembled path solves.  The two are the same operator up to
-//  the floating-point summation order ( A4.29 accepted
-//  2.4e-16 ),  so anything above that means the aggregation
-//  plan and the prolongation disagree -- and then nothing
-//  downstream can be trusted ( dead-ends M79 ).  Level 0 is
+//  the floating-point summation order,  so anything above that
+//  means the aggregation plan and the prolongation disagree --
+//  and then nothing downstream can be trusted.  Level 0 is
 //  checked too:  there the device applies the per-step cell
 //  blocks and the host the assembled M1 + dt K.
 //
-//  ( 2 ) One V-cycle on a test residual must contract it
-//  ( dead-ends M82 ).  The band is 0.5,  not 1.0:  "it
-//  contracts at all" is too weak a claim for a preconditioner
-//  the outer loop then relies on.  Every configuration
-//  measured so far lands between 2.7e-03 ( 8x16x32 ) and
-//  2.7e-01 ( polar,  n_smooth = 1 ),  so 0.5 is a tripwire,
-//  not a tuning knob ( STATUS.md ( 90 ) ).
+//  ( 2 ) One V-cycle on a test residual must contract it.  The
+//  band is 0.5,  not 1.0:  "it contracts at all" is too weak a
+//  claim for a preconditioner the outer loop then relies on.
+//  Across the meshes this line runs the contraction lands
+//  between 2.7e-03 and 2.7e-01,  so 0.5 is a tripwire,  not a
+//  tuning knob.
 //
 //  Both THROW,  not print:  a wrong aggregation or a
 //  non-contracting cycle only shows up as an iteration count
-//  in some gate's output otherwise,  and the small-mesh gates
-//  pass either way.
+//  in some caller's output otherwise.
 //
 //  The NUMBERS a human reads -- the per-level ladder,  the
 //  Galerkin image,  the smoother's lambda -- are NOT printed
 //  here.  They are a diagnostic,  they cost a device read-back
-//  of lam,  and they live in the pgen that wants them
-//  ( usr_ext/mhd_ee/ee_audit.cpp,  installed through audit( ) ).
-//  This function measures the two scalars,  hands them to that
+//  of lam,  and they go to the optional audit hook.  This
+//  function measures the two scalars,  hands them to that
 //  report,  and throws if either is out of band.
 __host__ void driver_t::check_hierarchy
 ( device::base_t & dev, const hier_t & h,
@@ -334,7 +320,7 @@ __host__ void driver_t::check_hierarchy
                 * double( yh[ size_t( i ) ] );
         }
         const double rel = std::sqrt( nd / ( nh > 0. ? nh : 1. ) );
-        if( !( rel <= worst_agg ) )   // NaN-aware,  like M76
+        if( !( rel <= worst_agg ) )   // NaN-aware
         {
             worst_agg = rel;
         }
@@ -368,7 +354,7 @@ __host__ void driver_t::check_hierarchy
     }
     dev.f_free( px );
     dev.f_free( py );
-    //  the gate's report,  with the contraction this function
+    //  the optional report,  with the contraction this function
     //  measured ( the report never runs the cycle twice )
     if( p_audit != nullptr )
     {
@@ -380,8 +366,8 @@ __host__ void driver_t::check_hierarchy
                      " operator mismatch is %.3e\n", worst_agg );
         throw std::runtime_error
             ( "mhd_ee::ni::edge_mg:  mf_t:  the device per-level"
-              " operator does not match the assembled one ( see"
-              " dead-ends M79 );  refusing to solve with it." );
+              " operator does not match the assembled one;"
+              " refusing to solve with it." );
     }
     if( !( contraction <= double( 0.5 ) ) )
     {
@@ -390,16 +376,14 @@ __host__ void driver_t::check_hierarchy
                      contraction );
         throw std::runtime_error
             ( "mhd_ee::ni::edge_mg:  mf_t:  one V-cycle does not"
-              " contract ( see dead-ends M82 );  refusing to solve"
-              " with it." );
+              " contract;  refusing to solve with it." );
     }
     return;
 };
 
 ////////////////////////////////////////////////////////////
-//  Install the gate's hierarchy report.  The function is the
-//  pgen's ( usr_ext/mhd_ee/ee_audit.cpp );  the driver only
-//  keeps the pointer and calls it from check_hierarchy( ).
+//  Install an optional hierarchy report.  The driver keeps the
+//  pointer and calls it from check_hierarchy( ).
 
 __host__ void driver_t::audit( void * ctx, hier_audit_t fn )
 {
@@ -512,9 +496,9 @@ __host__ void driver_t::free(  )
 };
 
 //  Read-only handles on the step state's host mirrors.  The
-//  step never calls this:  test_mode 15 poisons the mirrors,
-//  runs one step,  and asserts they are untouched -- the
-//  non-fakeable form of the traffic meter.
+//  step never calls this:  a caller that wants to prove a step
+//  touched no host mirror poisons them,  runs one step,  and
+//  asserts they are untouched.
 
 __host__ void driver_t::mirror
 ( const int & what, void ** pp, int & n, int & on_dev )
@@ -569,7 +553,7 @@ __host__ void driver_t::_allocate
     return;
 };
 
-//  ---- 1. the eta lattice,  on the device ( K1 )
+//  ---- 1. the eta lattice,  on the device
 __host__ void driver_t::_lattice
 ( device::base_t & dev, const view_t & v )
 {
@@ -601,16 +585,15 @@ __host__ void driver_t::_gradient
 //
 //  A matrix-free step ( ee_method = 5 ) with the device
 //  write-back consumes them IN PLACE:  level 0 reads them as
-//  they are and every coarse level aggregates them ( K2 was
-//  the last per-cell host mirror in a step ).  The read-back
-//  below therefore happens ONCE,  when the device hierarchy
-//  is extracted from the assembled one -- 13.11 MB of PREC2
-//  blocks that a step no longer pays.
+//  they are and every coarse level aggregates them.  The
+//  read-back below therefore happens ONCE,  when the device
+//  hierarchy is extracted from the assembled one,  not once
+//  per step.
 //
 //  The matrix-free step's DEVICE TAIL is defined for both
 //  write-back modes:  mode 1 forms bf from P_out( a_new ) -
-//  P_out( a_old ) through the K6 bridge,  mode 0 ( the
-//  shipped default ) forms the strong -dt d1( eta J )
+//  P_out( a_old ) through the representation bridge,  mode 0
+//  ( the shipped default ) forms the strong -dt d1( eta J )
 //  increment from the edge state and the eta lattice.  Either
 //  way the step copies no array.
 __host__ void driver_t::_blocks
@@ -638,7 +621,7 @@ __host__ void driver_t::_blocks
 //  That build is the only place the prolongation operators
 //  and the 2:1 cell hierarchy are defined,  so reading the
 //  TOPOLOGY off it is cheaper and much safer than deriving it
-//  a second time ( M74 was a weight bug ).  What it also
+//  a second time.  What it also
 //  leaves behind is the numbering ( keep / comp ) and the
 //  level-0 M1,  which is all the matrix-free backend needs to
 //  build its own device hierarchy.  After this block the
@@ -687,7 +670,7 @@ __host__ void driver_t::_build
 //  the one place that has to look at the host mirror of `a`
 //  -- and it must run BEFORE the tail seeds rep_old from the
 //  incoming state,  otherwise the first step's face increment
-//  would count the bridged state twice ( dead-ends M83 ).
+//  counts the bridged state twice.
 __host__ void driver_t::_bridge_in
 ( device::base_t & dev, const view_t & v, const par_t & par,
   const geo_sph_t & g, const cplx_t & c,
@@ -717,11 +700,10 @@ __host__ void driver_t::_bridge_in
 
 //  ---- 4c. the DEVICE TAIL.  The face write-back needs a
 //  per-face table ( owner cell,  face-local side, owner area,
-//  degenerate mask ),  all geometry:  K7 measured the
-//  per-step _face_areas at ~5 ms a block,  so it is built
+//  degenerate mask ),  all geometry:  rebuilding the per-cell
+//  areas every step is pure waste,  so the table is built
 //  here,  once.  rep_old starts at the INCOMING edge state,
-//  so the first step's increment is measured from it exactly
-//  like the host path did.
+//  so the first step's increment is measured from it.
 __host__ void driver_t::_tail_setup
 ( device::base_t & dev, view_t & v, const par_t & par,
   const geo_sph_t & g )
@@ -799,8 +781,8 @@ __host__ void driver_t::_solve
 };
 
 //  ---- 6. the device tail:  expand the compact solution onto
-//  the edge field,  then the representation bridge ( K6 ) and
-//  the face write-back ( K7 ) run on the arrays the step
+//  the edge field,  then the representation bridge and the
+//  face write-back run on the arrays the step
 //  already owns.  Nothing here returns to the host but the two
 //  O(1) counters of the M2 solve.
 __host__ void driver_t::_tail
@@ -813,8 +795,8 @@ __host__ void driver_t::_tail
     {
         //  Mode 1:  bf += P_out( a_new ) - P_out( a_old ).
         st.mf.expand( v.a, st.mf.lv[ 0 ].p_x, st.mf.p_xraw0 );
-        //  Warm start from the previous step's rep:  2-3 fewer
-        //  M2 iterations,  and the scalar readback count does
+        //  Warm start from the previous step's rep: it converges in
+        //  fewer iterations,  and the scalar readback count does
         //  not change ( it is still one 8-float copy per
         //  iteration ).
         ni_ie_represent_dev_raw

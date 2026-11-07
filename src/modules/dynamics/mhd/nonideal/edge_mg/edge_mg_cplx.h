@@ -7,16 +7,14 @@
 ////////////////////////////////////////////////////////////
 //  The cubical cell complex of ONE block, on the node set.
 //
-//  Built exactly as docs/mhd/nonideal/proto/p8_complex.py:
-//  nodes are indexed by the node set,  edges by
-//  (lower node, direction),  faces by (lower node, normal),
-//  cells by the cell index,  and periodicity is the
-//  identification of node indices modulo n.  d1 d0 = 0 and
-//  d2 d1 = 0 are then integer identities,  not
-//  approximations ( the boundary of a boundary is empty ).
+//  Nodes are indexed by the node set,  edges by (lower node,
+//  direction),  faces by (lower node,  normal),  cells by the
+//  cell index,  and periodicity is the identification of node
+//  indices modulo n.  d1 d0 = 0 and d2 d1 = 0 are then
+//  integer identities,  not approximations ( the boundary of
+//  a boundary is empty ).
 //
-//  Conventions ( identical to the Python side, so the local
-//  blocks can be compared element by element ):
+//  Conventions:
 //
 //    NN[ a ]   = n[ a ]  if periodic  else  n[ a ] + 1
 //    edge (a)  : i_a in [0, n_a),  transverse in [0, NN)
@@ -68,22 +66,17 @@ struct cplx_t
         return v < 0 ? v + N : v;
     };
 
-    //  POLE FOLDING ( spec 5.7 ): on a pole ring every phi
-    //  slot is the
+    //  POLE FOLDING: on a pole ring every phi slot is the
     //  SAME physical node, so the index folds to k = 0. The
-    //  node lattice
-    //  keeps its size ( the folded slots simply become
-    //  unreachable ), which
-    //  keeps every offset table and the device arithmetic
-    //  unchanged; the
-    //  consumers that must know about degeneracy use
-    //  degenerate_e() below.
+    //  node lattice keeps its size ( the folded slots simply
+    //  become unreachable ), which keeps every offset table
+    //  and the device arithmetic unchanged; the consumers that
+    //  must know about degeneracy use degenerate_e() below.
     //
     //  pole[0] / pole[1] are set when the theta axis has NO
-    //  wall at that
-    //  end, i.e. when the domain reaches the axis. Both
-    //  default to zero,
-    //  so a theta wedge is bit-for-bit what it was before.
+    //  wall at that end, i.e. when the domain reaches the
+    //  axis. Both default to zero, so a theta wedge with no
+    //  pole is bit-for-bit unchanged.
     __host__ __device__ int node( const idx_t & i ) const
     {
         int k = int( i[ 2 ] );
@@ -142,7 +135,7 @@ struct cplx_t
         return v;
     };
 
-    //  The 12 local edges of cell i,  in the Python's order
+    //  The 12 local edges of cell i,  in the local order
     //      ED = [ (a, sb, sl) for a in 0..2
     //  for sb in 0..1 for sl in 0..1 ]
     __host__ __device__ void cell_edges
@@ -219,7 +212,7 @@ struct cplx_t
     ( const idx_t & n_cell_eff, const bool ( & p )[ 3 ],
       const bool & pole_lo, const bool & pole_hi );
 
-    ////////// Incidence ( host,  for the gates ) //////////
+    ////////// Incidence ( host ) //////////
     //  d0: edges -> nodes, +1 at the head, -1 at the tail.
     //  A thin axis ( NN == 1 ) gives an empty row ( the
     //  edge is a closed loop,  the discrete analogue of a
@@ -233,8 +226,8 @@ struct cplx_t
     //  axis the last edge of the row has its head at index
     //  n_a,  which is the same physical node as 0 but a
     //  different coordinate -- anything that turns an edge
-    //  into a geometric vector ( the gates' linear-field
-    //  probe,  the write-back metric ) must use this form.
+    //  into a geometric vector ( the linear-field probe,  the
+    //  write-back metric ) must use this form.
     __host__ __device__ void edge_key
     ( const int & e, int & a, idx_t & nd ) const
     {
@@ -344,32 +337,22 @@ __host__ __device__ inline bool wall_tangent_e
     return false;
 };
 
-//  The live-dof mask of a 1-form space: a DEGENERATE edge (
-//  zero length,
-//  on a pole ring ) is not a degree of freedom, so keep = 0
-//  there and comp
-//  compacts the rest. Everything that scatters into a
-//  global vector must go
-//  through comp -- otherwise the degenerate rows are
-//  structurally zero and
-//  the operator is singular.
-//  The compact numbering. It is a CONVENTION: every object
-//  that enters the
-//  operator ( M1, K, G, C, P, the nodewise sites )
-//  addresses the compact space
-//  through `comp`, so a PERMUTATION here is transparent to
-//  all of them.
+//  The live-dof mask of a 1-form space:  a DEGENERATE edge (
+//  zero length,  on a pole ring ) is not a degree of freedom,
+//  so keep = 0 there and comp compacts the rest.  Everything
+//  that scatters into a global vector must go through comp --
+//  otherwise the degenerate rows are structurally zero and the
+//  operator is singular.
+//  The compact numbering is a CONVENTION:  every object that
+//  enters the operator ( M1, K, G, C, P, the nodewise sites )
+//  addresses the compact space through `comp`,  so a
+//  PERMUTATION here is transparent to all of them.
 //
-//  `site_major` permutes it so that the up-to-three edges
-//  of one NODE get
-//  CONSECUTIVE compact indices. Why: the nodewise smoother
-//  then reads three
-//  CONSECUTIVE rows of the CSR instead of three scattered
-//  ones, which is the
-//  only remaining limiter of that kernel ( measured: thread
-//  count and the
-//  dependent-load chain both matter not, foundations 9z-x
-//  ).
+//  `site_major` permutes it so that the up-to-three edges of
+//  one NODE get CONSECUTIVE compact indices:  the nodewise
+//  smoother then reads three consecutive CSR rows instead of
+//  three scattered ones,  which is the only remaining
+//  limiter of that kernel.
 __host__ void make_keep
 ( const cplx_t & c, std::vector< int > & keep,
   std::vector< int > & comp, int & n_compact,

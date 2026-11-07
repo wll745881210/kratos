@@ -191,10 +191,10 @@ __host__ std::vector< int > mf_cnt
 //  The aggregation plan of level `l`,  read off the P CSR of
 //  level `l - 1`.
 //
-//  Everything is derived from the ACTUAL prolongation rows
-//  ( not from a second reading of the weight rules ):  M74
-//  was a weight bug,  and re-deriving the weights here would
-//  reintroduce it in a place the gates do not look.
+//  Everything is derived from the ACTUAL prolongation rows,
+//  not from a second reading of the weight rules:  a
+//  re-derivation could disagree with P and the block structure
+//  would be wrong where nothing looks.
 __host__ void mf_t::_plan
 ( const int & l,  const std::vector< int > & keep_f,
   const std::vector< int > & comp_f,  const cplx_t & cf,
@@ -308,7 +308,7 @@ __host__ void mf_t::_plan
                 {
                     throw std::runtime_error( "mf_t: a prolongation row leaves "
                         "its parent cell -- the per-cell block structure the "
-                        "device hierarchy assumes is broken ( M74 family )" );
+                        "device hierarchy assumes is broken" );
                 }
                 const size_t base = size_t( pos[ size_t( ic ) ] ) * 12
                                   + size_t( e );
@@ -722,12 +722,10 @@ __host__ float_t mf_t::_read_res( const int & depth ) const
 ////////////////////////////////////////////////////////////
 //  The smoothing:  DAMPED diagonal Jacobi.
 //
-//  proto-mg ( /tmp/plain_mg.md ) measured what a per-cell
-//  12x12 block does here:  lam_max( S A ) = 65 at 13.8k
-//  edges and 304 at 104k,  i.e. it over-corrects like h^-2,
+//  A per-cell 12x12 block over-corrects like h^-2 here,
 //  and no fixed damping is stable across meshes.  The
 //  diagonal has a mesh-independent lam_max( D^-1 A ) of
-//  3.7--3.97,  so the smoother is  x += omega D^-1 ( b - A x )
+//  about 3.8,  so the smoother is  x += omega D^-1 ( b - A x )
 //  with  omega = 2 / ( lam_max ( 1 + 1 / 8 ) ):  the low end
 //  of the interval is lam_max / 8,  the usual choice for a
 //  smoothing ( not a solving ) polynomial.
@@ -865,12 +863,10 @@ __host__ void mf_t::smooth( const int & l,  const float_t * p_b,
 //
 //  The coarsest level is solved to a tight tolerance by the
 //  same device PCG with the block-Jacobi preconditioner.
-//  That is a deliberate deviation from the host path ( which
-//  factorises the coarsest operator densely when it fits ):
-//  a preconditioner only sets the rate,  never the answer,  so
-//  the outer gate is the same one the assembled path has --
-//  and the host factorisation would put the coarsest solve
-//  back on the bus,  which is the whole thing P5 removes.
+//  A dense coarsest factorisation would be faster per solve but
+//  would put the coarsest solve back on the bus;  and a
+//  preconditioner only sets the rate,  never the answer,  so
+//  the outer solve is unaffected by the choice.
 __host__ void mf_t::vcycle( const int & l,  float_t * p_x )
 {
     mf_lvl_t & lv_ = lv[ size_t( l ) ];
@@ -938,9 +934,9 @@ __host__ const float_t * mf_t::cycle_apply( const int & l,
 ////////////////////////////////////////////////////////////
 //  The device PCG.
 //
-//  Same iteration as `pcg_dev_t` ( same reductions,  same
-//  residual definition,  same break on a non-positive
-//  curvature ),  with two differences that matter here:
+//  Same reductions,  same residual definition and same break
+//  on a non-positive curvature as the face solve,  with two
+//  things that matter here:
 //  the work vectors are OWNED by the hierarchy instead of
 //  being allocated per solve,  and `warm` decides whether
 //  `x` starts from the caller's value.  A cold start is what
@@ -961,9 +957,9 @@ __host__ pcg_stat_t mf_t::pcg
     //  from the device as well.  The host's part of an iteration
     //  is exactly one 8-scalar copy -- `res` for the loop test
     //  and `ok` for the curvature breakdown -- plus the launches.
-    //  That is the O(1)-scalar shape a step is allowed to have
-    //  ( STATUS.md ( 90 ) ),  and it is bit-identical to the old
-    //  host-side finish:  the partials are still summed in order.
+    //  That is the O(1)-scalar shape a step is allowed to have,
+    //  and the partials are still summed in ORDER,  so the
+    //  result does not depend on the thread schedule.
     //
     pcg_stat_t st;
     const int n = lv[ size_t( l ) ].n_compact;

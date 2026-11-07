@@ -7,17 +7,16 @@
 //  canonical prolongation P ( fine rows x coarse columns ),  and the
 //  compact numbering that every level shares with the device.  Those
 //  are topology plus the three per-direction weight rules,  so they
-//  live here,  where both the production step and the reference-side
-//  gates can build them without touching a solver.
+//  live here,  where they can be built without touching a solver.
 //
-//  What is NOT here ( and is gone from the line as of P6/P7,  2026-11-06 ):
-//  the assembled operators,  the HX auxiliary spaces,  the site blocks,
-//  the Chebyshev workspaces,  the dense coarsest factorisation and the
-//  host V-cycle.  Those were the `mg_t` half;  method 5 replaced them.
+//  What is NOT here:  the assembled operators,  the HX auxiliary spaces,
+//  the site blocks,  the Chebyshev workspaces,  the dense coarsest
+//  factorisation and the host V-cycle.  Those belong to the assembled
+//  path;  method 5 does not need them.
 //
-//  The three rules of build_P ( spec 5.2 ) are written out one by one,
-//  because getting one wrong is the 143x trap ( dead-ends M74:  the
-//  uncoarsened own axis must NOT be halved ).
+//  The three rules of build_P are written out one by one,  because
+//  getting one wrong is catastrophic:  the uncoarsened own axis must
+//  NOT be halved.
 
 #include <vector>
 #include <stdexcept>
@@ -85,13 +84,12 @@ inline csr_t build_P
             {
                 //  An axis the coarsening does NOT touch is the identity
                 //  in both index and weight -- including the edge's own
-                //  axis.  Halving here ( the pre-P3 form did,  for q == a
-                //  regardless of `coarse[q]` ) folds a pair of fine
-                //  edges onto one coarse edge: P then maps into the
-                //  pair-constant subspace while the coarse complex keeps
-                //  the full axis,  so d1 P != P_f d1_c ( gate C7 ) and
-                //  the Galerkin coarse operator no longer belongs to the
-                //  stored coarse complex.
+                //  axis.  Halving here folds a pair of fine edges onto
+                //  one coarse edge: P then maps into the pair-constant
+                //  subspace while the coarse complex keeps the full
+                //  axis,  so d1 P != P_f d1_c and the Galerkin coarse
+                //  operator does not belong to the stored coarse
+                //  complex.
                 oi[ q ][ 0 ] = i % NNc[ q ];
                 ow[ q ][ 0 ] = 1.;
                 on[ q ] = 1;
@@ -141,29 +139,20 @@ inline csr_t build_P
         }
     }
     csr_t P;
-    //  the COLUMN count is the coarse compact size, given
-    //  explicitly:
-    //  a coarse edge that no fine edge touches would
-    //  otherwise make the
-    //  pattern-derived count too small, and P^T would then
-    //  return a
-    //  SHORT vector ( that is what made the V-cycle index
-    //  out of range
-    //  in the first ncol attempt,  2026-10-29 ).
-    //  the column count is the COARSE COMPACT size, not the
-    //  coarse edge
-    //  count: with the pole rings dropped those differ, and
-    //  using the
-    //  edge count made P's columns run past the compact
-    //  operator.
+    //  The column count is the COARSE COMPACT size, given
+    //  explicitly:  it is not the coarse edge count ( the pole
+    //  rings drop edges,  so the two differ ),  and a coarse
+    //  edge that no fine edge touches would otherwise make the
+    //  pattern-derived count too small -- P^T would then
+    //  return a SHORT vector.
     P.build( n_fine, n_coarse, rows, cols, vals );
     return P;
 };
 
 ////////////////////////////////////////////////////////////
-//  Coarsening ( E1 ).  n_lvl is a COLLECTIVE quantity in a
-//  multi-block run ( reduce it across blocks );  the single
-//  block gates do not need the reduction.
+//  Coarsening.  n_lvl is a COLLECTIVE quantity in a multi-block
+//  run ( reduce it across blocks );  a single block does not need
+//  the reduction.
 
 
 inline int mg_can_coarsen( const idx_t & n, const int ( & cdir )[ 3 ] )
@@ -204,10 +193,7 @@ inline csr_t galerkin( const csr_t & A, const csr_t & P,
     //  time, accumulated into a dense workspace and emitted
     //  already
     //  sorted. No global triplet list, so no O(M log M)
-    //  sort over all
-    //  the products -- that sort was 15 s of one-off build
-    //  at
-    //  (8,16,32) ( measured 2026-10-29 ).
+    //  sort over all the products.
     //
     //  The pattern is STRUCTURAL: entries whose value
     //  happens to be zero
@@ -317,8 +303,7 @@ inline csr_t galerkin( const csr_t & A, const csr_t & P,
 //  The eight buckets are only a STORAGE partition ( parity
 //  of the node indices ).  Block Chebyshev does not sweep
 //  them sequentially and never updates a residual between
-//  buckets: the name `col` below is historical.  The true
-//  8-colour Gauss-Seidel was removed with `ee_smoother=1`.
+//  buckets:  the name `col` below is historical.
 //
 //  The representative of an edge is its LOWER node, which
 //  is exactly what cplx_t::edge_key returns.
@@ -365,7 +350,7 @@ inline void compact_csr
 //
 //  -- the same triangle inequality gershgorin_max uses, so
 //  the two agree by
-//  construction ( A4.24 checks it ). Each S entry is a
+//  construction. Each S entry is a
 //  binary search in a
 //  row whose columns are sorted ( csr_t::build guarantees
 //  it ).
@@ -378,7 +363,7 @@ struct hier_t
 {
     std::vector< mg_lvl_t > L;
     //  the compact numbering of level 0 ( `make_keep` may permute it
-    //  with site_major ),  kept here so the step and the gates agree
+    //  with site_major ),  kept here so every caller agrees on it
     int                site_major { 1 };
     int                   bc_edge { 0 };
 

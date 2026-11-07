@@ -15,13 +15,11 @@ using rie_mh_t = dynamics::mhd::riemann::hlld_t< T >;
 // HLLD core for the hydro-magnetic fields, plus passive
 // upwind advection of the species.
 //
-// 2026-10-13 fix ( the chemistry::hydro::rie_t form ):  the
-// species fluxes are NORMALIZED so that their mass content
+// The species fluxes are NORMALIZED so that their mass content
 // sums to the mass flux EXACTLY,
 //     sum_n flx_n * mcgs_n  =  m_A * flx[ rho ].
-// The earlier form ( flx_n = w_n * flx[ rho ] / rho_upwind )
-// does not have this property:  the reconstructed w can make
-// the species - carried mass differ from the mass flux.
+// Without the normalization the reconstructed w can make the
+// species - carried mass differ from the mass flux.
 template< class derived_T = crtp::dummy_t >
 struct rie_t : crtp::helper_t< rie_t, derived_T, rie_mh_t >
 {

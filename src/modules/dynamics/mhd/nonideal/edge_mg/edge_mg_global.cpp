@@ -6,11 +6,11 @@
 //  The host assemblers.
 //
 //  `assemble_m1k_a` builds the mass,  the stiffness and the
-//  summed operator of one level on the host ( the gates'
-//  reference side;  production uses the device path in the
-//  kernels/ subdirectory ),  and `reduce_rhs` maps a raw
-//  edge vector onto the compact space.  Both are pure host
-//  loops over the complex;  nothing here is device code.
+//  summed operator of one level on the host ( the reference
+//  side;  production uses the device path in the kernels/
+//  subdirectory ),  and `reduce_rhs` maps a raw edge vector
+//  onto the compact space.  Both are pure host loops over the
+//  complex;  nothing here is device code.
 
 namespace mhd_ee::ni::edge_mg
 {

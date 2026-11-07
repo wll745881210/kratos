@@ -8,15 +8,13 @@
 ////////////////////////////////////////////////////////////
 //  The host half of the device representation.
 //
-//  Three kernels and a device CG replace the host chain
-//  (`_assemble_m2` + `_represent`): the mask and the
-//  per-face counts are topology, the 6x6 blocks are read
-//  in place, and the solve's scalars never leave the
-//  device -- the host DISPATCHES and does not compute
-//  ( H1, STATUS.md ( 90 ) ).  Nothing here is device
-//  code:  the `__global__` wrappers are in
-//  kernels/ni_ie_kernels.h and the seven kernel-op
-//  structs stay in the header.
+//  Three kernels and a device CG,  no host chain:  the mask
+//  and the per-face counts are topology,  the 6x6 blocks are
+//  read in place,  and the solve's scalars never leave the
+//  device -- the host DISPATCHES and does not compute.
+//  Nothing here is device code:  the `__global__` wrappers are
+//  in kernels/ni_ie_kernels.h and the seven kernel-op structs
+//  stay in the header.
 ////////////////////////////////////////////////////////////
 
 namespace mhd_ee::ni::edge_mg
@@ -343,7 +341,7 @@ __host__ rep_solve_stat_t rep_dev_solve
         {
             //  A non-positive curvature:  alpha was zero and the
             //  guard kept both updates off,  so the state is
-            //  clean ( dead-ends M86 ).
+            //  clean.
             break;
         }
     }

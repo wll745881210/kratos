@@ -18,14 +18,10 @@ namespace mhd_ee::ni::edge_mg
 __host__ bool geo_sph_from
 ( const geo_t & geo, geo_sph_t & g )
 {
-    //  the TYPE check first: without it a cartesian block
-    //  is happily read
-    //  as a spherical one ( the uniform-grid test passes ),
-    //  and the "wrong"
-    //  answer looks like a device bug rather than a
-    //  dispatch bug -- which is
-    //  exactly what happened on the first A4.7 run (
-    //  2026-10-29 ).
+    //  the TYPE check first: without it a cartesian block is
+    //  happily read as a spherical one ( the uniform-grid test
+    //  passes ),  and the "wrong" answer looks like a device
+    //  bug rather than a dispatch bug.
     if( geo.geo_type != geo_t::spherical )
     {
         return false;

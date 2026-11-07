@@ -326,21 +326,18 @@ base_t< derived_T >::calc_field( const bdt_T & b_d ) const
             if( i[ a ] < b_d.geo.n_ceff[ a ] )
                 ee_g[ a ] = ee[ a ];
         //  The boundary - plane advective edge EMF  ( the
-        //  r_out field - anchoring fix ):  on an out / fre
-        //  side  ( geo.bnd_out )  the boundary - plane
-        //  edges would otherwise keep the init ZERO  ( no
-        //  functor writes them )  -- a zero - E wall that
-        //  piles the wound field up against the boundary
-        //  ( the reverse - current sheet  ->  eta_A cap
-        //  ->  anti - diffusion  ->  blow - up chain ).
-        //  Pure advection,  first order,  NO ghost
-        //  reads,  no corner terms:  the interior cell 's
-        //  E = -( v x Bbar )  with  v  from  w  ( cons2prim
-        //  - fresh )  and  Bbar  the cell 's face - average
-        //  field.   Interface planes stay untouched  (
-        //  act_flx owns them ).   Inflow sides  ( the
-        //  outflow functor 's veto  zeroes the normal  v )
-        //  degrade continuously to the old  E ~ 0.
+        //  r_out field anchoring ):  on an out / fre side  (
+        //  geo.bnd_out )  the boundary - plane edges would
+        //  otherwise keep the init ZERO  ( no functor writes
+        //  them )  --  a zero - E wall that piles the wound
+        //  field up against the boundary.
+        //  Pure advection,  first order,  NO ghost reads,  no
+        //  corner terms:  the interior cell's E = -( v x Bbar )
+        //  with v from w ( cons2prim - fresh ) and Bbar the
+        //  cell's face - average field.   Interface planes stay
+        //  untouched ( act_flx owns them ).   Inflow sides  (
+        //  the outflow functor's veto zeroes the normal v )
+        //  degrade continuously to  E ~ 0.
         for( int  a = 0; a < 3; ++  a )
         {
             const int n( b_d.geo.n_ceff[ a ] );
@@ -515,9 +512,8 @@ __host__  void base_t< derived_T >::calc_flx
 //  cell has no neighbour to exchange with:  its "wrap"
 //  slots ( index 1 .. n_gh ) must BE the slot - 0 face.
 //  Left stale they feed the corner EMFs with a phantom
-//  face and the CT stops telescoping --  the  n_phi = 1
-//  ( true 2.5D,  n_dim = 2 )  divergence blow - up of
-//  2026-10-21.   Runs after every CT update.
+//  face and the CT stops telescoping.   Runs after every
+//  CT update.
 template< class bdt_T >
 __global__ void thin_axis_sync_k( const bdt_T b_d )
 {

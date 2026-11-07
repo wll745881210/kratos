@@ -11,7 +11,7 @@ namespace rad::fld
 // functor's  __device__ operator( )  ( the dynamics /
 // prototypes pattern -- the  __global__  kernels below
 // only forward );  the per - launch parameters are the
-// functor members.   Design notes:  fld - method.md.
+// functor members.
 
 //  Seed  src_dat  with  E^n + dt ( S + a T^4 )  and fill
 // the phybnd ghost slots with the zero - gradient
@@ -114,9 +114,8 @@ struct src_fun_t
 };
 
 //  The Robin inhomogeneous source:  add  F dt / dx  to
-// the boundary row's  src_dat  ( derivation:  fld -
-// method.md § 3 ).   Only the boundary cell of each
-// enabled  ( a, k )  is touched.
+// the boundary row's  src_dat.   Only the boundary cell of
+// each enabled  ( a, k )  is touched.
 
 struct robin_p_t
 {
@@ -164,11 +163,10 @@ struct robin_p_t
 // Marshak pair:   the operator's  vac_bnd  outflow
 // ( c E / 4 )  is completed by  + c E_dir / 4  on the RHS
 // at the flagged physical faces,  so the boundary  E
-// relaxes to  E_dir  ( the  T_min  environment --  the
+// relaxes to  E_dir  ( the  T_min  environment -- the
 // spherical - grid analog of the periodic  mean
-// subtraction;   seeliger - literature.md § 2 ).   The
-// pair shares  c4  and the same cell  dx  convention as
-// the operator's  w_side.
+// subtraction ).   The pair shares  c4  and the same cell
+// dx  convention as the operator's  w_side.
 
 struct anchor_fun_t
 {
@@ -244,10 +242,9 @@ __device__ __forceinline__ type::float_t fld_lam
 };
 
 //  Freeze the coefficients into  co_arr  ( level 0 ).
-//  The kappa profile gives the SHAPE ( D ~ lam / kappa,
+//  The kappa profile gives the SHAPE  ( D ~ lam / kappa,
 // sig ~ kappa )  against the uniform normalization;  the
-// limiter's  lambda  is evaluated on the current  E  --
-// the full scaling:  fld - method.md § 4.
+// limiter's  lambda  is evaluated on the current  E.
 
 struct freeze_fun_t
 {
@@ -354,8 +351,8 @@ struct freeze_fun_t
 
 //  Fill the level - 0  phybnd ghost slots of  mgd.fld
 // with the Robin closure  E_g = E_i + dx F / D  ( the
-// inflow ghost sits HIGHER;  fld - method.md § 3 )  so
-// the limiter's  R  at the boundary cells is right.
+// inflow ghost sits HIGHER )  so the limiter's  R  at
+// the boundary cells is right.
 
 struct ghost_fun_t
 {
@@ -556,9 +553,8 @@ struct rcoarse_fun_t
 
 //  SMR coefficient ghosts  ( the mirror of the nonideal
 // rfill / xfill family,  with only the 2 scalar
-// components;  derivation:  fld - method.md § 8 ).
-//  Same - level face:  the ghost slab copies the
-// neighbour's boundary cells verbatim.
+// components ).   Same - level face:  the ghost slab copies
+// the neighbour's boundary cells verbatim.
 
 template< class bdt_T >
 __global__ void fld_rfill_k
@@ -711,8 +707,8 @@ struct fld_t : fld_mg_base_t
 
     ////////// Data //////////
     bool     enabled;
-    //  Knobs  ( the  [fld]  pars;  scaling notes:
-    //  fld - method.md § 1 ):
+    //  Knobs  ( the  [fld]  pars ).   d_unif  is  D,  NOT
+    // dt - scaled;  sig_unif  is  c kappa_a rho.
     f_t      d_unif;        //  D  ( NOT dt - scaled )
     f_t      sig_unif;      //  c kappa_a rho
     int      var_coef;
@@ -1044,7 +1040,7 @@ struct fld_t : fld_mg_base_t
     };
 
     //  Freeze -> solve,  wrapped in the Picard outer loop
-    // when the limiter is on  ( fld - method.md § 4 ).
+    // when the limiter is on.
     void solve_picard( mesh::mesh_t & mesh, const f_t & dt )
     {
         auto & dev = * this->p_dev;
@@ -1186,8 +1182,7 @@ struct fld_t : fld_mg_base_t
     // same - level faces verbatim,  the cross - level
     // sides fine - reads - coarse / coarse - averages -
     // fine ).   Same - rank neighbours only  ( cross -
-    // rank runs one block per rank in the current
-    // isolation stage ).   fld - method.md § 8.
+    // rank runs one block per rank for now ).
     void fill_co_ghost( mesh::mesh_t & mesh )
     {
         auto & dev = * this->p_dev;

@@ -116,9 +116,8 @@ __global__ void dbg_ee_k( const bdt_T b_d,
 //      rescaled by the ratio of the metric factors so
 //      that the transport of the angular momentum is
 //      consistent with the finite-volume geometry.
-//      In contrast to the source terms in Athena++
-//      (which the user identified as buggy), the
-//      angular momentum transport here needs NO
+//      In contrast to the source terms in Athena++,
+//      the angular momentum transport here needs NO
 //      face-averaged flux source terms: the rescaling
 //      of the total momentum flux ( which already
 //      includes the magnetic tension ) carries the
@@ -134,9 +133,8 @@ __global__ void dbg_ee_k( const bdt_T b_d,
 //         d_mom_th = dt [ < p* d(theta) > + ( T_5 - T_6 ) ]
 //      where p* = p + B^2/2, T_i are pointwise kinetic
 //      and magnetic terms, and < ... > are the exact
-//      volume moments.  This avoids the second Athena
-//      bug ( transferring v_r*v_theta - like terms to
-//      face centers ).
+//      volume moments.  This keeps v_r*v_theta - like
+//      terms from ever reaching face centers.
 //  3.  The constrained transport uses the physical
 //      edge lengths and face areas of the spherical
 //      cells, so that the discrete div( B ) = 0
@@ -154,7 +152,6 @@ struct sph_t : crtp::helper_t< sph_t, derived_T, rk2_t >
     ////////// Data //////////
     type::float_t omega_0;
     //  The polar phi - rebin  ( [mesh] pole_rebin_lvl ).
-    //  docs/mhd/pole-rebin.md.
     mhd_rebin_t      rebin;
     //  [nonideal] dbg_cell = i0 i1 i2 :  the per - CT
     //  ingredient dump at that cell  ( -1 = off ).
@@ -162,9 +159,7 @@ struct sph_t : crtp::helper_t< sph_t, derived_T, rk2_t >
     type::idx_t        dbg_i;
     //  [mesh] pole_emf  ( 1 = default ):  the polar EMF
     //  regularisation  ( pole_emf_k,  Athena++'s
-    //  PolarSingleEMF ).  0 skips it -- a diagnostic hatch for
-    //  the 2026-10-22 finding that the 3D polar re-injection is
-    //  pole-specific ( STATUS.md sec. 3bis ).
+    //  PolarSingleEMF ).  0 skips it.
     int          pole_emf_on;
 
     ////////// Functions //////////

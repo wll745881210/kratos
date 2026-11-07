@@ -8,9 +8,8 @@
 //
 //  This header is the ONLY thing a pgen ( or the module's
 //  ni_t ) may include:  declarations and plain data,  no
-//  device code,  no templates ( rule C7 of docs/mhd/
-//  nonideal/edge-mg-foundations.md section 3.3 ).  All the
-//  kernels and the driver live in edge_mg.cpp.
+//  device code,  no templates.  All the kernels and the
+//  driver live in edge_mg.cpp.
 
 class input;
 
@@ -36,7 +35,7 @@ struct par_t
 {
     ////////// Data //////////
     int       enable;    // ee_enable   ( the whole leg )
-    int        solve;    // ee_solve    0 = the S0' diagnostic ( bit-identical ),
+    int        solve;    // ee_solve    0 = diagnostic only,  state untouched,
                          //  1 = assemble + solve + write
                          //  back
     int      subcell;    // ee_subcell  0 = one tensor a cell,  1 = + Taylor
@@ -56,7 +55,7 @@ struct par_t
     //  applies );  > 0 = force this dt and relax the cap.
     //  For the STS / implicit A/B only.
     float_t   ee_dt;
-    //  ee_a_bridge:  A7.1 representation IN,  M1 a = M12 b,
+    //  ee_a_bridge:  representation IN,  M1 a = M12 b,
     //  when no edge state is available ( first step /
     //  restart ).  bf is converted from B.n to a flux with
     //  the CT face areas.
@@ -66,8 +65,8 @@ struct par_t
     //  tolerance of the COARSEST level's nested PCG.  A solver
     //  setting,  not a method setting:  the coarse solve only
     //  conditions the V-cycle,  so shrinking it costs accuracy
-    //  nothing and can pay 3x of a step.  Defaults are the
-    //  measured pair ( STATUS.md ( 90 ) ).
+    //  nothing and can pay 3x of a step.  The defaults are
+    //  set by par_t( ).
     int   ee_coarse_iter;
     float_t ee_coarse_tol;
     ////////// Functions //////////
@@ -90,8 +89,7 @@ public:
     bool               ready;
     float_t *        p_dmax;   // device: max |div b| ( smoke )
     float_t        div_dmax;   // host  : last read-back
-    //  the last solve, so a gate ( or a log ) can quote its
-    //  cost
+    //  the last solve,  so a caller can quote its cost
     int               last_it;
     int            last_nred;
     int           last_ncomm;
@@ -105,13 +103,13 @@ public:
     __host__ void  step   ( device::base_t &, const void *,
                             view_t & );
     __host__ void  finalize( device::base_t & );
-    //  the step's driver,  created on first use.  Only a GATE
-    //  calls this,  to install the hierarchy report
-    //  ( driver_t::audit,  usr_ext/mhd_ee/ee_audit.cpp );
-    //  step( ) below is the production caller.
+    //  the step's driver,  created on first use.  Only a
+    //  caller that wants the hierarchy report calls this
+    //  ( driver_t::audit );  step( ) below is the production
+    //  caller.
     __host__ driver_t * driver( void );
-    //  the array traffic of the LAST implicit step, i.e. P5's
-    //  exit meter ( zero reads and zero writes is the gate ).
+    //  the array traffic of the LAST implicit step ( zero
+    //  reads and zero writes is the invariant ).
     __host__ void  traffic_read
     ( int & n_read, int & n_write, long & b_read,
       long & b_write ) const;
@@ -120,25 +118,21 @@ public:
 
 
 ////////////////////////////////////////////////////////////
-//  P5's exit meter:  the array traffic of the LAST implicit
+//  The exit meter:  the array traffic of the LAST implicit
 //  step ( solver_t::traffic_read above ).
 //
 //  The criterion is reads = 0 AND writes = 0:  inside one
 //  implicit step,  no per-cell or per-face array may cross
 //  the bus.  O(1) scalars do not count -- reading an
 //  iteration count or a residual back is scheduling,  not a
-//  violation of H1.  The setup traffic ( grid,  coefficients,
-//  the numbering ) moves once and is not counted either.
+//  violation.  The setup traffic ( grid,  coefficients,  the
+//  numbering ) moves once and is not counted either.
 //
-//  P4/P5 read this from gate_e2e ( M9.5 );  the number they
-//  must drive to zero is what the shipped step prints today.
-//
-//  The step state's host mirrors,  for a gate that must PROVE
-//  a step copied nothing ( a hand-written meter can always be
-//  wrong,  and it cannot see storage it never instruments ),
-//  are NOT declared here:  that accessor is
-//  driver_t::mirror( ) in edge_mg_driver.h,  which only a gate
-//  includes.
+//  A hand-written meter can always be wrong,  and it cannot
+//  see storage it never instruments,  so a caller that must
+//  PROVE a step copied nothing uses driver_t::mirror( ) in
+//  edge_mg_driver.h instead -- that accessor is NOT declared
+//  here.
 
 ////////////////////////////////////////////////////////////
 //  The one piece of glue the module side needs:  build the
@@ -147,9 +141,9 @@ public:
 //  This template is instantiated in whichever TU calls it
 //  ( the module's ni_t::diffuse,  i.e. once per pgen ),  so
 //  it must stay HOST-ONLY and free of device code --  the
-//  point of the view is that no kernel ever sees bdt_T
-//  ( rule C2,  foundations section 3.3 ).  The member names
-//  below are the mhd block-data contract,  not a pgen's.
+//  point of the view is that no kernel ever sees bdt_T.
+//  The member names below are the mhd block-data contract,
+//  not a pgen's.
 
 template< class bdt_T > __host__
 inline view_t make_view( const bdt_T & b_d )

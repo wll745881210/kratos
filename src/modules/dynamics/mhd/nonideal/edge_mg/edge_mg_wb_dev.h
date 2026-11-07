@@ -16,20 +16,18 @@
 #include "kernels/ni_ie_kernels.h"
 
 ////////////////////////////////////////////////////////////
-//  P5 / K7 -- the DEVICE write-back:  edge solution -> face
-//  field,  one thread per face.
+//  The DEVICE write-back:  edge solution -> face field,  one
+//  thread per face.
 //
-//  solve_step's write-back ( edge_mg.cpp,  the loop after
-//  the solve ) does two things every step:
+//  A write-back has two parts,  and only the second one is
+//  per-step arithmetic:
 //
-//    (1) it REBUILDS the per-cell face areas,
-//        `_face_areas( g, i, ar )` for every cell,  into
-//        `st.far[ ic*6 + s ]`.  The areas are a property
-//        of the BLOCK GEOMETRY alone:  eta,  the solution,
-//        dt,  ee_subcell and the iterative refinement never
-//        enter them.  Recomputing them each step is O(nc)
-//        of 3x3 Gauss quadrature -- pure waste.
-//    (2) it walks the faces and updates `bf`:
+//    (1) the per-cell face areas.  They are a property of the
+//        BLOCK GEOMETRY alone:  eta,  the solution,  dt,
+//        ee_subcell and the iterative refinement never enter
+//        them.  Recomputing them each step is O(nc) of 3x3
+//        Gauss quadrature -- pure waste.
+//    (2) the face walk that updates `bf`:
 //
 //          ar = far[ ic*6 + 2 a + s ]        ( owner cell )
 //          if( ar > 0 && !degenerate )
@@ -51,27 +49,20 @@
 //  bijection onto the faces,  so every face owns exactly
 //  one ( node,  component ) slot,  and two faces never
 //  write the same `float2_t` component.  `wb_build` CHECKS
-//  the injectivity of the slot map anyway ( it is O(1)
-//  work per face plus one sort at setup time ),  because a
-//  silent collision would be a data race that no gate could
-//  see -- the last writer wins and the numbers look sane.
+//  the injectivity of the slot map anyway ( it is O(1) work
+//  per face plus one sort at setup time ),  because a silent
+//  collision would be a data race nothing else could see --
+//  the last writer wins and the numbers look sane.
 //
-//  WHAT THE TABLE IS FOR ( and what it frees ):
+//  WHAT THE TABLE IS FOR:  the per-step area fill and the
+//  per-step HOST round trip of `bf` both disappear -- the
+//  update runs where `bf` lives -- and the owner selection
+//  ( the canonical owner must be the one the ASSEMBLY used )
+//  is computed once,  by the same `face_key` decomposition
+//  the assembler uses,  so it cannot drift from it.
 //
-//  * the per-step `st.far` fill disappears -- call
-//    `wb_dev_fill_far` once per block,  from the per-face
-//    areas `ref_face_area` already provides,  and the
-//    per-cell 6-area array is no longer needed at all;
-//  * the per-step HOST round trip of `bf` disappears --
-//    the update runs where `bf` lives;
-//  * the owner selection ( M66:  the canonical owner must
-//    be the one the ASSEMBLY used ) is computed once,  by
-//    the same `face_key` decomposition the assembler uses,
-//    so it cannot drift from it.
-//
-//  WHEN THE TABLE MUST BE REBUILT ( the price of caching
-//  the geometry -- see the K7 report for the full
-//  argument ):
+//  WHEN THE TABLE MUST BE REBUILT ( the price of caching the
+//  geometry ):
 //
 //  * the block's shape ( `c` ) changed -- regrid,  level
 //    change,  refinement / coarsening of this block;
@@ -80,27 +71,24 @@
 //    an SMR regrid that re-creates the block's geo;
 //  * the `bf` array was re-created ( its `dat` / `n_gh` /
 //    `n_cell` are baked into `slot` ).
-//  It must NOT be rebuilt per step:  the mesh does not
-//  move between steps of one solve,  and that is exactly
-//  the O(nc) that this file removes.
+//  It must NOT be rebuilt per step:  the mesh does not move
+//  between steps of one solve,  and that is exactly the O(nc)
+//  that this file removes.
 //
 //  TRAPS THIS FILE IS BUILT AROUND:
 //
-//  * M63 -- a probe that reads the WRONG array does not
-//    crash,  it prints zero error.  Hence the gate checks
-//    the frozen slots ( ghosts,  degenerate faces,  the
-//    untouched components ) BIT FOR BIT against the
-//    uploaded field,  not just the updated ones;
-//  * M67 -- a degenerate pole face is ELIMINATED,  not
-//    zeroed:  the write must be SKIPPED ( leaving `bf`
-//    alone ),  never `flux / 0`.  `deg` is therefore
-//    checked before `ar`,  and a gate must run with a real
-//    pole ( the a5 wedge has none at theta = 0 );
-//  * M66 -- a periodic axis has no high wall:  `nd[ a ]`
-//    wraps,  so no face of a periodic axis is owned from
-//    `s = 1`.  `wb_build` counts such faces and refuses to
-//    build if the count is not zero ( the seam would then
-//    be owned from the wrong side ).
+//  * the FROZEN slots ( ghosts,  degenerate faces,  the
+//    untouched components ) must not change: a read of the
+//    WRONG array is silent,  not a crash,  so "the updated
+//    entries look right" says nothing about them;
+//  * a degenerate pole face is ELIMINATED,  not zeroed:  the
+//    write must be SKIPPED ( leaving `bf` alone ),  never
+//    `flux / 0`.  `deg` is therefore checked before `ar`;
+//  * a periodic axis has no high wall:  `nd[ a ]` wraps,  so
+//    no face of a periodic axis is owned from `s = 1`.
+//    `wb_build` counts such faces and refuses to build if
+//    the count is not zero ( the seam would then be owned
+//    from the wrong side ).
 ////////////////////////////////////////////////////////////
 
 namespace mhd_ee::ni::edge_mg
@@ -129,7 +117,7 @@ using mesh::dat_3d_t;
 
 ////////////////////////////////////////////////////////////
 //  The static per-face table plus the counters a caller
-//  ( or a gate ) wants printed.
+//  wants printed.
 ////////////////////////////////////////////////////////////
 
 struct wb_dev_t
@@ -155,11 +143,10 @@ struct wb_dev_t
 //  far[ ic*6 + 2a + s ] from the per-face areas.
 //
 //  `p_a[ f ]` is the area of face `f`,  in the canonical
-//  decomposition `c.face_key( f, a, nd )` -- exactly what
-//  `ref_face_area` fills.  The scatter takes the OWNER
-//  cell of each face,  so the result is,  entry by entry,
-//  the owner entry of the old `_face_areas( g, i, ar )`
-//  array,  and the per-step loop that built it can go away.
+//  decomposition `c.face_key( f, a, nd )`.  The scatter takes
+//  the OWNER cell of each face,  so the result is,  entry by
+//  entry,  the owner entry of the per-cell 6-area array,  and
+//  the per-step loop that fills that array can go away.
 //
 //  Slots that no face owns are LEFT ALONE ( a periodic axis
 //  has no high wall ),  so the caller should zero the
@@ -172,13 +159,13 @@ __host__ int wb_dev_fill_far
 
 ////////////////////////////////////////////////////////////
 //  Build the host table.  No device traffic -- `wb_upload`
-//  is separate so that a gate ( or a sabotage run ) can
-//  inspect / perturb the table before it is sent.
+//  is separate so that the table can be inspected or
+//  perturbed before it is sent.
 //
 //  `far_host` must be the per-cell 6-area array for THIS
-//  block's lattice,  i.e. `wb_dev_fill_far`'s output ( or
-//  the old `st.far` ).  `bf` supplies only `idx / n_gh /
-//  n_cell / n_int`:  the table is tied to ONE array.
+//  block's lattice,  i.e. `wb_dev_fill_far`'s output.  `bf`
+//  supplies only `idx / n_gh / n_cell / n_int`:  the table
+//  is tied to ONE array.
 ////////////////////////////////////////////////////////////
 
 __host__ void wb_build
@@ -215,7 +202,7 @@ __host__ void wb_dev_free
 //  PRECISION = 1 the host also downcasts the stored
 //  float2_t to float_t before the arithmetic ).
 //
-//  A face that is degenerate ( M67 ) or has no positive
+//  A face that is degenerate or has no positive
 //  area is SKIPPED -- `bf` keeps its value bit for bit.
 //  The `deg` test comes FIRST so that a stale / negative
 //  area on an eliminated face can never divide.
@@ -271,8 +258,8 @@ __host__ void ni_ie_writeback_dev
 //    wb0_edge_k   pass 2.  Per EDGE,  gather the cells that
 //                 hold it,  dot with the cached edge
 //                 vector,  divide by the count ( the
-//                 scatter normality trap that bit K4 /
-//                 A4.31 ),  apply the `bc_edge == 1` wall
+//                 scatter normality trap ),  apply the
+//                 `bc_edge == 1` wall
 //                 mask.
 //    wb0_face_k   pass 3.  Per face: the cached d1 row
 //                 ( 4 edge indices + signs + nz ),  the
@@ -281,7 +268,7 @@ __host__ void ni_ie_writeback_dev
 //
 //  WHY A GATHER AND NOT `atomicAdd`.  The host accumulates
 //  `acc[ e ]` in a FIXED order -- cells ascending -- and the
-//  gate's threshold is 1e-15.  An atomic scatter sums in
+//  comparison threshold is 1e-15.  An atomic scatter sums in
 //  hardware order,  so the same input gives a different last
 //  bit on every run: it would not be comparable to the host
 //  bit for bit,  and `cnt` would need a second atomic.  The
@@ -289,22 +276,21 @@ __host__ void ni_ie_writeback_dev
 //  device sums in the host's order and the result is
 //  reproducible AND equal.
 //
-//  WHY THE TENSOR IS THE RAW LATTICE.  The host `writeback`
-//  takes `p_eta6` ( six numbers a cell,  from
-//  `_eta_lat_host` ) and never looks at `p_deta` / `p_xc`.
-//  `ee_subcell` shapes the OPERATOR's tensor,  not the
-//  write-back's,  so this path reads `p_lat` and nothing
-//  else:  it mirrors the reference instead of quietly
-//  "fixing" it.  ( If the reference ever learns the sub-cell
-//  tensor,  `wb0_cell_k` needs one extra per-cell
-//  expansion -- the table already carries the cell index. )
+//  WHY THE TENSOR IS THE RAW LATTICE.  A write-back takes
+//  `p_eta6` ( six numbers a cell ) and never looks at
+//  `p_deta` / `p_xc`.  `ee_subcell` shapes the OPERATOR's
+//  tensor,  not the write-back's,  so this path reads `p_lat`
+//  and nothing else,  exactly like the host write-back
+//  instead of quietly "fixing" it.  ( If the sub-cell tensor
+//  ever reaches the write-back,  `wb0_cell_k` needs one extra
+//  per-cell expansion -- the table already carries the cell
+//  index. )
 //
 //  THE DEGENERATE MASK.  A pole theta face has area EXACTLY
 //  zero,  and `j_from_curl` tests `area > 0` on its own,  and
 //  pass 3 tests `ar > 0` as well.  So on the meshes this line
-//  runs,  dropping the degenerate mask alone is INVISIBLE --
-//  the gate reports that as a finding,  not as a pass.  The
-//  mask is still carried ( one flag a face,  the host has it
+//  runs,  dropping the degenerate mask alone is INVISIBLE.
+//  The mask is still carried ( one flag a face,  the host has it
 //  too ) because it is the first guard when `far` is stale or
 //  negative,  and because the pass-3 skip is what makes the
 //  frozen-slot check meaningful.
@@ -314,11 +300,11 @@ __host__ void ni_ie_writeback_dev
 //  The mode-0 static tables plus its device scratch.
 //
 //  Everything index-shaped is resolved once,  on the host:
-//  the cell's six global faces,  the six per-cell areas (
-//  the old `st.far`,  computed once instead of every step ),
-//  the four ( edge, sign ) pairs of every face,  the CSR
-//  cell list of every edge,  the edge vectors,  the
-//  wall-tangent mask,  and the `a`-array slot of every edge.
+//  the cell's six global faces,  the six per-cell areas
+//  ( computed once instead of every step ),  the four
+//  ( edge, sign ) pairs of every face,  the CSR cell list of
+//  every edge,  the edge vectors,  the wall-tangent mask,
+//  and the `a`-array slot of every edge.
 ////////////////////////////////////////////////////////////
 
 struct wb0_dev_t
@@ -367,17 +353,17 @@ struct wb0_dev_t
 };
 
 ////////////////////////////////////////////////////////////
-//  The flat cell index,  the same layout `st.far` uses:
+//  The flat cell index of the per-cell area array:
 //      ic = ( i2*n1 + i1 ) * n0 + i0
 ////////////////////////////////////////////////////////////
 
 __host__ idx_t wb0_idx( const cplx_t & c, const int & ic );
 
 ////////////////////////////////////////////////////////////
-//  Build the host tables.  `far_host` is the per-cell array
-//  the old step loop rebuilt every step:
+//  Build the host tables.  `far_host` is the per-cell area
+//  array a step needs:
 //
-//      _face_areas( g, i, ar );  far[ ic*6 + s ] = ar[ s ];
+//      far[ ic*6 + s ] = area of cell ic's side s
 //
 //  i.e. the OWN parametrisation of the cell -- NOT the owner
 //  side of its high faces.  That distinction is real: the
@@ -387,8 +373,8 @@ __host__ idx_t wb0_idx( const cplx_t & c, const int & ic );
 //  the last bits.  Pass 1 needs the per-cell array,  the bf
 //  update needs the owner entry of the same array.
 //
-//  Degenerate faces are zeroed here,  exactly where the host
-//  zeroes them ( before `j_from_curl` ).
+//  Degenerate faces are zeroed here,  before `j_from_curl`
+//  sees the array.
 ////////////////////////////////////////////////////////////
 
 template< class geo_T >

@@ -12,23 +12,19 @@
 //
 //  This TU is what a pgen links against:  the knobs
 //  ( par_t ),  the solver's own state ( solver_t ) and the
-//  one-shot smoke diagnostic ( S0' ).  The implicit step
+//  one-shot divergence diagnostic.  The implicit step
 //  itself -- every host action it has,  and the state it
 //  keeps between steps -- lives in edge_mg_driver.h/.cpp and
 //  is reached through driver_t,  which solver_t owns.
 //
-//  Method:  docs/mhd/nonideal/algorithm-spec-edge-implicit-
-//  diffusion.md.  Engineering constraints ( why this file
-//  and not the pgen,  why no template on the block data,
-//  why the eta tensor is data ):  docs/mhd/nonideal/
-//  edge-mg-foundations.md sections 3.3 and 4.1.
+//  No template on the block data and no device code here:
+//  the pgen sees a plain C++ interface and the eta tensor as
+//  data.
 //
-//  S0' scope ( foundations section 9 ):  the leg exists,
-//  allocates,  is switched by  [nonideal] ee_enable,  and
-//  leaves the state BIT-IDENTICAL.  The face-flux
-//  divergence printed here is a plumbing check,  NOT a
-//  gate:  the gate form ( median,  per-cell eps,  the
-//  polar rows excluded ) arrives with A1.
+//  The diagnostic leg exists,  allocates,  is switched by
+//  [nonideal] ee_enable,  and leaves the state BIT-IDENTICAL.
+//  The face-flux divergence printed here is a plumbing check,
+//  not a convergence test.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -36,9 +32,9 @@ namespace mhd_ee::ni::edge_mg
 __host__ par_t::par_t(  )
 {
     enable     =    0;
-    solve      =    0;      // S0':  the diagnostic only,  bit-identical
+    solve      =    0;      // 0 = divergence diagnostic only,  state untouched
     subcell    =    0;      // one tensor a cell
-    ee_coarsen =    3;      // r and theta,  never phi ( spec 5.6 )
+    ee_coarsen =    3;      // r and theta,  never phi
     ee_verb    =    0;
     ee_iter    =  100;
     ee_nlevel  =    8;
@@ -182,7 +178,7 @@ __host__ void solver_t::step
         //  ---- THE IMPLICIT STEP.  The state and the whole
         //  host side of one step live in driver_t;  this
         //  function only owns the solver's slot and the
-        //  scalars a gate or a log quotes.
+        //  scalars a caller quotes.
         solve_stat_t ss;
         driver(  ) -> step( dev, stream, v, par, ss );
         last_it   = ss.it;

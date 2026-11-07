@@ -12,18 +12,16 @@ namespace chemistry::mhd
 template< typename T >
 using rec_mh_t = dynamics::mhd::reconstruct::plm_t< T >;
 
-// 2026-10-13 rewrite:  the previous version was a plain
-// shell --  MHD PLM for every slot,  no element - conserving
-// correction at all.  This ports the chemistry::hydro::rec_t
-// algorithm ( cals_d:  species reconstructed with the
-// DENSITY slot's limiter coefficients;  cals_s:  full PLM +
+// Species reconstruction for MHD:  the chemistry::hydro::rec_t
+// algorithm ( cals_d:  species reconstructed with the DENSITY
+// slot's limiter coefficients;  cals_s:  full PLM +
 // stoichiometric projection stoi.proj + non - negative
-// clamping of the corrections ) with two MHD adaptations:
-//   * operator() routes every face through calc() --  the
-//     MHD plm_t::operator() calls uniform / general per slot
+// clamping of the corrections ),  with two MHD adaptations:
+//   * every face goes through calc():  the MHD
+//     plm_t::operator() calls uniform / general per slot
 //     DIRECTLY and would bypass the correction;
 //   * the CT slot bcc + axis is COPIED,  never PLM'd.
-// The base stays a template template parameter so this
+// The base is a template template parameter,  so the
 // correction composes with any reconstruction law ( e.g. the
 // CK15 well - balanced pressure treatment of usr /
 // intermediate / plm_ck15.h via

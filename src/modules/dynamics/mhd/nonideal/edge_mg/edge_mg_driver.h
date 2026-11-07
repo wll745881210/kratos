@@ -25,11 +25,10 @@
 //  steps,  and every host-side action of one step.
 //
 //  This header is INTERNAL to the module -- it is not the
-//  pgen's interface ( that is edge_mg_iface.h,  rule C7 ).
-//  Nothing here defines a body:  the declarations are
-//  satisfied by edge_mg_driver.cpp,  and only the two
-//  templates ( the geometry helpers ) are instantiated
-//  there.
+//  pgen's interface ( that is edge_mg_iface.h ).  Nothing here
+//  defines a body:  the declarations are satisfied by
+//  edge_mg_driver.cpp,  and only the two templates ( the
+//  geometry helpers ) are instantiated there.
 //
 //  `solver_t` owns one of these ( edge_mg_iface.h ),  so the
 //  whole host side of the leg is a member of one type
@@ -61,9 +60,7 @@ struct step_state_t
     void *                p_lat { nullptr };
     void *                p_gr  { nullptr };
     void *                p_xc  { nullptr };
-    //  host mirrors.  A matrix-free step does NOT touch them;
-    //  test_mode 15 checks that by poisoning them
-    //  ( dead-ends M81 ).
+    //  host mirrors.  A matrix-free step does NOT touch them.
     std::vector< cell_blk_t > blk_h;
     std::vector< float2_t >   lat_h;
     std::vector< float_t  >   eta_h;
@@ -76,10 +73,9 @@ struct step_state_t
     //  edge_mg_mf.h ).
     mf_t                     mf;
     bool                mf_ready { false };
-    //  the device tail:  the representation bridge ( K6 ) and
-    //  the face write-back ( K7 ) run on the arrays the step
-    //  already owns,  so a step copies no per-cell or
-    //  per-face array at all.
+    //  the device tail:  the representation bridge and the face
+    //  write-back run on the arrays the step already owns,  so
+    //  a step copies no per-cell or per-face array at all.
     rep_dev_t              rep_dev;
     wb_dev_t                    wb;
     wb0_dev_t                  wb0;
@@ -106,8 +102,8 @@ class driver_t
 {
 public:
     ////////// Data //////////
-    //  the state ( the gates read its mirrors through
-    //  mirror( ),  nothing else does )
+    //  the state ( mirror( ) exposes its host mirrors;  nothing
+    //  else reads them )
     step_state_t                  st;
     ////////// Functions //////////
     __host__ driver_t(  );
@@ -118,12 +114,12 @@ public:
       const par_t & par, solve_stat_t & out );
     //  release every device buffer ( the solver's finalize )
     __host__ void free(  );
-    //  the array traffic of the LAST step ( the P5 exit meter )
+    //  the array traffic of the LAST step
     __host__ void traffic
     ( int & n_read, int & n_write, long & b_read,
       long & b_write ) const;
     __host__ bool traffic_on(  ) const;
-    //  the step state's host mirrors,  for a gate that must
+    //  the step state's host mirrors,  for a caller that must
     //  PROVE a step copied nothing.  `what` is 0..5 for blk_h
     //  / lat_h / eta_h / a_h / bf_h / far,  6 for the host
     //  solution vector,  7 for the matrix-free device vector;
@@ -131,14 +127,13 @@ public:
     //  device pointer.
     __host__ void mirror
     ( const int & what, void ** pp, int & n, int & on_dev );
-    //  A GATE's report on the hierarchy it just built.  The
-    //  module asserts the two invariants of check_hierarchy( )
-    //  and throws;  the numbers a human reads -- the per-level
-    //  ladder,  the Galerkin image,  the smoother's lambda --
-    //  are a diagnostic,  and they live in the pgen that wants
-    //  them ( usr_ext/mhd_ee/ee_audit.cpp installs this ).
-    //  The cycle's scalar is passed in,  so the report never
-    //  runs the cycle twice.
+    //  An OPTIONAL report on the hierarchy,  installed by the
+    //  caller.  The module itself asserts the two invariants of
+    //  check_hierarchy( ) and throws;  the numbers a human reads
+    //  -- the per-level ladder,  the Galerkin image,  the
+    //  smoother's lambda -- are a diagnostic,  and the caller
+    //  supplies the sink.  The cycle's scalar is passed in,  so
+    //  the report never runs the cycle twice.
     //  Production leaves the hook null and prints nothing.
     using hier_audit_t = void (*)
     ( void * ctx, device::base_t & dev, const hier_t & h,
@@ -156,7 +151,7 @@ private:
     //  the device this driver last ran on ( for the destructor
     //  only:  a step may be the last thing before teardown )
     device::base_t *          p_dev { nullptr };
-    //  the gate's hierarchy report ( null in production )
+    //  the hierarchy report hook ( null in production )
     void *            p_audit_ctx { nullptr };
     hier_audit_t           p_audit { nullptr };
     __host__ void read_arr

@@ -10,10 +10,9 @@ namespace mhd_ee::ni::edge_mg
 //  The host half of the cell complex.
 //
 //  `setup` builds the offset/stride tables,  `d0_row` and
-//  `d1_row` give the incidence rows the gates compare
-//  against ( d1 d0 = 0 is an integer identity,  so the
-//  gates may look at them ),  and the two `make_keep_*`
-//  build the live-dof masks.
+//  `d1_row` give the incidence rows ( d1 d0 = 0 is an integer
+//  identity,  so they can be inspected directly ),  and the
+//  two `make_keep_*` build the live-dof masks.
 //
 //  Nothing here is device code:  the device reaches the
 //  complex through the tables only,  and every device

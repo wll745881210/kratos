@@ -24,36 +24,21 @@
 //      the matching EOS wrapper  ( the parabolic dt cap ).
 //
 //  ------------------------------------------------------------
-//  REMOVED 2026-10-28 ( S0 of docs/mhd/nonideal/
-//  HANDOVER-EDGE-MG-PORT.md 2.3 ). The implicit curl - curl
-//  leg is gone:
-//
-//    mg_cc_diffusion_t< prx_default_t, const_eta_t >
-//        the implicit driver 's default instantiation,
-//    prx_default_t::p_mhd / p_mg_cc
-//        its proxy statics,
-//
-//  together with  implicit_mg.h / implicit_cc.h /
-//  mg_ni_base.h / ni_probe_device.h / proxy.h , all
-//  archived
-//  in  backup/nonideal-retired-2026-10-28/ .   [nonideal]
-//  mg_cc > 0 now THROWS in ni_t::init ( see nonideal.h ) --
-//  silently ignoring it would have changed the physics
-//  without
-//  saying so.  Recover with:
-//      git show backup/pre-edge-mg-2026-10:<path>
+//  The implicit curl - curl leg is not instantiated: it has no
+//  driver,  no proxy statics and no supporting headers in this
+//  build.  [nonideal] mg_cc > 0 throws in ni_t::init rather
+//  than being silently ignored -- ignoring it would change the
+//  physics without saying so.
 //  ------------------------------------------------------------
 //
 //  NOTE the include ORDER.   ni_t 's  init / diffuse  take
 //  dynamics::base_t  BY REFERENCE and touch its members
-//  ( mod.p_dev / mod.p_bdk ), so the base must be a
-//  COMPLETE
+//  ( mod.p_dev / mod.p_bdk ), so the base must be a COMPLETE
 //  type here --  i.e. the dynamics module header,  not just
 //  the non - ideal one. Without ../mhd.h the instantiation
 //  dies with a wall of " incomplete type dynamics::base_t "
 //  errors that then CASCADE into bogus  " no member read "
-//  reports from the EOS chain.   A pgen always had mhd.h in
-//  front,  which is why the defect stayed invisible.
+//  reports from the EOS chain.
 #include "../../../../../../src/modules/dynamics/mhd/mhd.h"
 #include "nonideal.h"
 

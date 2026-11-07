@@ -5,8 +5,7 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  The saturation region ( design.md sec. 5,  ledger cont.
-//  48;  the user's direction 2026-10-14 ):  cells with
+//  The saturation region:  cells with
 //  rho < kappa * rho_sat( r ),  rho_sat( r ) = rho_sat0 *
 //  ( r / r0 )^q,  are the strongly - irradiated,  low -
 //  opacity,  floor - adjacent region --  physically the
@@ -49,8 +48,7 @@ struct disk_sat_t
     //  The relaxation ring ( [ring] r_out ):  cells with
     //  r < ring_r are chem - skipped WITHOUT the rewrite,
     //  too --  the ring relaxation owns their state,  and
-    //  the direct - FUV photoionization of the inner cells
-    //  ( the t ~ 0.38 dt - collapse,  ledger cont. 66 ) is
+    //  the direct - FUV photoionization of the inner cells is
     //  cut at the source.
     type::float_t ring_r;
     //  Theta - edge chem - skip band ( [chem] skip_nt ),
@@ -59,10 +57,10 @@ struct disk_sat_t
     int         skip_nt;
     //  [chemistry] skip_T_hi / skip_T_lo ( K ):  chem - skip
     //  cells OUTSIDE the thermal window --  the forensics
-    //  probes for the stiff - cell localization ( cont. 71 ):
-    //  run one probe with skip_T_hi = 2e3 ( skip the cold
-    //  cells )  and one with skip_T_lo = 2e3 ( skip the hot
-    //  ones );  whichever recovers the speed owns the cost.
+    //  probes for the stiff - cell localization:  run one
+    //  probe with skip_T_hi = 2e3 ( skip the cold cells )
+    //  and one with skip_T_lo = 2e3 ( skip the hot ones );
+    //  whichever recovers the speed owns the cost.
     //  The mask reads the THERMAL part of ene.
     type::float_t skip_cs2_hi;
     type::float_t skip_cs2_lo;
@@ -77,11 +75,10 @@ struct disk_sat_t
     //  cell );  the polar - funnel chem - skip cells have
     //  no solver to enforce that,  and the boundary fluxes
     //  accumulate a net e- / H+ mismatch instead --  an
-    //  exponential drift ( x1. 12 / cycle from t = 0. 05,
-    //  float32 overflow at cycle 728 -> Inf - Inf = NaN in
-    //  the PLM reconstruction;  v13 post - mortem,
-    //  2026 - 10 - 15 ).   Every chem - skip cell is
-    //  therefore renormalized back onto its rho here.
+    //  exponential drift that overflows float32 and gives
+    //  Inf - Inf = NaN in the PLM reconstruction.   Every
+    //  chem - skip cell is therefore renormalized back onto
+    //  its rho here.
     type::float_t mcgs[ n_max ];
 
     ////////// Functions //////////
@@ -255,7 +252,7 @@ struct disk_sat_t
         //  chem - skip only,  INDEPENDENT of the hydro
         //  freeze --  the boundary - adjacent FUV baking
         //  otherwise drives the fast hot funnel flow that
-        //  caps dt ( v4 diagnostics,  cont. 68 ).
+        //  caps dt.
         if( i[ 1 ] < skip_nt
             || i[ 1 ] >= b_d.geo.n_ceff[ 1 ] - skip_nt )
         {
@@ -301,13 +298,11 @@ struct disk_sat_t
             return;
         //  rho and the energy untouched.   The saturated
         //  composition is MASS - normalized onto the cell's
-        //  rho ( the bare set_sat_comp redistribution left
-        //  the species mass content inconsistent with rho
-        //  by a fixed ratio each step;  the load - clamped
-        //  renormalization cycle in the solver then acted
-        //  as a per - step amplifier,  x1. 12 / cycle from
-        //  t = 0. 05 --  the v13 float32 overflow NaN wave,
-        //  2026 - 10 - 15 ).
+        //  rho:  the bare set_sat_comp redistribution leaves
+        //  the species mass content inconsistent with rho by a
+        //  fixed ratio each step,  and the load - clamped
+        //  renormalization cycle in the solver then acts as a
+        //  per - step amplifier ( which overflows float32 ).
         auto * sp = u + ( idx::bcc + 3 );
         set_sat_comp( sp );
         return norm_mass( sp, rho );
@@ -376,7 +371,7 @@ struct disk_sat_t
 };
 
 ////////////////////////////////////////////////////////////
-//  Thin per - cell kernel ( style guide sec. 13.1 ).
+//  Thin per - cell kernel.
 
 template< class bdt_T >
 __global__ void disk_sat_k

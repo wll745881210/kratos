@@ -37,6 +37,7 @@ import numpy as np
 import torch
 
 from model import StackedDeepONet
+import os
 
 FLOOR = 1e-30
 
@@ -226,7 +227,8 @@ def main():
                     help="allowed absolute eps-p90 increase over the "
                          "init baseline when --sel-stat is on")
     ap.add_argument("--tag", default="prod")
-    ap.add_argument("--out", default="~/scratch/donet_tst/fid/models")
+    ap.add_argument("--out", default=os.path.join(
+        os.environ.get("KRATOS_DONET", "donet_tst/fid"), "models"))
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
 

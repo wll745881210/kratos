@@ -10,10 +10,9 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  The chemistry -> diffusivity bridge ( design.md sec. 4,
-//  T10 ):  the conductivity tensor from the local
-//  composition,  WBG19 's prescription verbatim (
-//  microphys src / chemistry_ext / non_ideal.cpp ):
+//  The chemistry -> diffusivity bridge:  the conductivity
+//  tensor from the local composition,  WBG19 's
+//  prescription verbatim:
 //
 //  per species k ( charge z_k,  mass m_k,  n_k ):
 //    gamma_k = <sigma v>_k / ( m_k + m_ave ),
@@ -27,9 +26,8 @@ namespace interm
 //  eta_O = c^2 / ( 4 pi sig_O ),
 //  eta_A = c^2 sig_P / ( 4 pi ( sig_H^2 + sig_P^2 ) )
 //          - eta_O.
-//  Hall is EVALUATED but never returned ( eh = 0 while the
-//  hyper - resistivity formulation is off --  the project
-//  decision ).
+//  Hall is EVALUATED but never returned ( eh = 0 unless the
+//  hyper - resistivity formulation is enabled ).
 //
 //  Collision rates:  ions  2e-9 | z | / sqrt( m_ave )
 //  ( Draine 2011 via Bai 2011 );   electrons  4.8e-9 max(
@@ -65,8 +63,8 @@ struct disk_eta_t
     //  eta SOURCE,  eta <= eta_c * dx  with  eta_c = c t0 / l0  ( the
     //  code - unit light speed ).   The bound is  eta <= eta_cap_c * eta_c * dx.
     type::float_t  eta_cap_c;
-    //  [nonideal] eta_cap_ref  ( DEFAULT 1e4 => pn <= 1e4;  measured:
-    //  choice ):  the coefficient of the PARABOLIC bound applied at the SAME
+    //  [nonideal] eta_cap_ref  ( DEFAULT 1e4 => pn <= 1e4 ):  the
+    //  coefficient of the PARABOLIC bound applied at the SAME
     //  place,      eta <= eta_cap_ref * dx^2 / dt_0        ( dt_0 = FULL step )
     //  so the parabolic number  pn = eta dt / dx^2  stays <= eta_cap_ref when
     //  the sub - step equals the full step.   <= 0 disables.
@@ -90,36 +88,25 @@ struct disk_eta_t
     //  CT diffusion --  exactly div - free.
     type::float_t  fun_w;
     type::float_t  fun_eta;
-    //  The cylindrical - R winding damper ( [wedge],  the
-    //  user 's 2026 - 10 - 15 direction ):  extra eta inside
-    //  R = r sin( theta ) < wedge_R,  ramped smoothly from
-    //  wedge_R down to R_in,  so the inner region 's toroidal
-    //  wind - up ( the Zanni / MRI channel that grows B_phi
-    //  without bound at r ~ 1 - 2. 6,  lat 1 - 37 --  run13
-    //  t05:  B_phi 0 -> 2. 7e5 by t = 0. 5 ) stays controlled,
-    //  while the wind - up OUTSIDE wedge_R is left untouched
-    //  --  that one is the physical disk - wind launching
-    //  mechanism ( WBG19 ).   Under the implicit mg_cc the
-    //  added eta costs no parabolic dt,  so the "dare not
-    //  raise the inner eta" constraint of the explicit runs
-    //  is gone.   wedge_R <= 0 disables.
+    //  The cylindrical - R winding damper ( [wedge] ):  extra eta inside
+    //  R = r sin( theta ) < wedge_R,  ramped smoothly from wedge_R down
+    //  to R_in,  so the inner region 's toroidal wind - up ( the Zanni /
+    //  MRI channel that grows B_phi without bound ) stays controlled,
+    //  while the wind - up OUTSIDE wedge_R is left untouched --  that one
+    //  is the physical disk - wind launching mechanism ( WBG19 ).   Under
+    //  the implicit mg_cc the added eta costs no parabolic dt.
+    //  wedge_R <= 0 disables.
     type::float_t  wedge_R;
     type::float_t  wedge_eta;
     //  [wedge] polar_gate ( DEFAULT 1 ):  require the CYLINDRICAL
     //  radius to be resolved by at least this many theta cells,
     //      R > wedge_gate * dx_theta,
-    //  before the damper is allowed to act.   R = r sin( theta )
-    //  -> 0 for EVERY r as theta -> 0, so at the pole the ramp
-    //  saturates and paints the full wedge_eta down the WHOLE axis
-    //  column -- where the spherical phi metric is degenerate and
-    //  the cylindrical winding the damper exists for is not even
+    //  before the damper acts.   R = r sin( theta ) -> 0 for EVERY r as
+    //  theta -> 0, so at the pole the ramp saturates and paints the full
+    //  wedge_eta down the WHOLE axis column -- where the spherical phi
+    //  metric is degenerate and the cylindrical winding is not even
     //  representable by the grid ( R / dx_theta = 0.5 there ).
-    //  Measured (full - polar production stack, 2026 - 10 - 25):  that
-    //  column is where the |v| / |B| burst and the consequent dt
-    //  collapse live -- MGCCDT argmin = (0,0,0),  |v| 0 -> 82,
-    //  |B| -> 259 and dt 2.68e-4 -> 7.16e-7 by cycle 3 ( the
-    //  DT - COLLAPSE fuse ).   wedge_gate = 0 restores the pre - fix
-    //  behaviour exactly ( A / B switch ).
+    //  wedge_gate = 0 disables.
     type::float_t  wedge_gate;
     //  [wedge] ramp:  0 ( default ) = quadratic s^2 ADD,
     //  1 = wide linear ADD,  2 = the BLEND ( eo -> eta_damp,
@@ -127,29 +114,24 @@ struct disk_eta_t
     //  ea -> eta_damp ).
     int          wedge_lin;
     int          wedge_inv;
-    //  The extra - eta parabolic - dt guard ( [nonideal]
-    //  eta_dt,  code units,  0 = off ):  the ring / funnel
-    //  ADDED eta is capped at 0. 25 * dx_min^2 / eta_dt,  so
-    //  the explicit / STS parabolic cap stays ~ eta_dt at
-    //  every cell  ( coarse cells keep the full eta,  the
-    //  fine - theta cells near r_in get it scaled down;
-    //  run11's t ~ 3 collapse:  ring eta 0. 3 on dx_theta
-    //  1. 4e-3 -> dt_dif 1. 6e-6 ).   The PHYSICAL eta is
-    //  untouched ( it owns its own WBG19 cap ).
+    //  The extra - eta parabolic - dt guard ( [nonideal] eta_dt,  code
+    //  units,  0 = off ):  the ring / funnel ADDED eta is capped at
+    //  0.25 * dx_min^2 / eta_dt,  so the explicit / STS parabolic cap
+    //  stays ~ eta_dt at every cell ( coarse cells keep the full eta,
+    //  the fine - theta cells near r_in get it scaled down ).   The
+    //  PHYSICAL eta is untouched ( it owns its own WBG19 cap ).
     type::float_t  eta_dt;
     //  The suppression rim ( [suppress],  mirrored from
     //  disk_chem_sat / disk_intg ):  eta = 0 there --  no
     //  diffusion,  and in particular no eta J^2 heating of
-    //  the frozen cells.   [nonideal] eta_supp = 0
-    //  disables the mask ( the A / B knob for the mg_cc
-    //  freeze investigation ).
+    //  the frozen cells.   [nonideal] eta_supp = 0 disables
+    //  the mask.
     int     supp_nr;
     int     supp_nt;
     int     supp_on;
     //  DIAGNOSTIC ( [profile] eta_out_kill,  >= 1 ):  zero
     //  the PHYSICAL eo/ea in the last N radial cells
-    //  ( the boundary band )  -- the A/B probe for the
-    //  boundary-cell eta participation in the blow-up.
+    //  ( the boundary band ).
     int     out_kill;
     //  The TOTAL-eta parabolic cap ( [nonideal] eta_cap_dt,  code
     //  time units,  0 = off ).  Unlike eta_dt ( which only caps the
@@ -157,8 +139,8 @@ struct disk_eta_t
     //  FINAL eo / ea -- wedge blend included -- by
     //       eta <= 0.25 * dx_min^2 / eta_cap_dt
     //  so the implicit operator's parabolic number dt*eta/h^2 is
-    //  bounded at EVERY cell.  Motivation ( STATUS.md sec. 3bis ):  the
-    //  wedge puts one eta = 0.3 on cells spanning 50x in size ( the
+    //  bounded at EVERY cell.  The wedge puts one eta = 0.3 on cells
+    //  spanning 50x in size ( the
     //  polar r*dtheta ~ 1.6e-3 vs the midplane ~8e-2 ),  the coarse
     //  operator then disagrees with the fine one and the V-cycle
     //  amplifies by x6.4 per iteration.
@@ -239,7 +221,7 @@ struct disk_eta_t
         m_gr = 4.1887902 * r_dust * r_dust * r_dust
              * rho_dust;
         //  Physical cap ( WBG19:  ~ 10 c_s h at r_in )  and
-        //  the hard ceiling ( WBG19 's eta_max = 1e20;  our default is 1e22,  measured healthy ).
+        //  the hard ceiling ( WBG19 's eta_max = 1e20;  the default is 1e22 ).
         const type::float2_t cap_cgs = args.get
             < type::float2_t >
             ( "nonideal", "eta_cap_cgs", 1e22 );
@@ -386,18 +368,16 @@ struct disk_eta_t
         //  physical disk - wind launching ( WBG19 )  and is
         //  left alone.
         //  [wedge] ramp = 0 ( default ):  ADD form,  quadratic
-        //  s^2.   ramp = 1:  ADD,  wide linear.   ramp = 2:
-        //  the BLEND form ( the user 's direction ):
+        //  s^2;  1:  ADD,  wide linear;  2:  the BLEND form:
         //      eta = eta_damp * x + eta_phys * ( 1 - x ),
         //  x LINEAR from 0 at R_damp to 1 at R <= R_in ( the
         //  column above the carved - out region ),  eta_phys
         //  the CURRENT local physical value.   The total eta
         //  is then CONTINUOUS ( value AND bounded slope )
         //  across R_damp -- no edge for the implicit operator
-        //  to trip on ( the ADD form's single - cell edge
-        //  spike,  run13 mode - 1 ).   The blend applies to eo;
-        //  ea keeps its physical value ( an Ohmic - flavored
-        //  damper ).   Blend finalized after the physical eta
+        //  to trip on ( as the ADD form's single - cell edge spike would ).
+        //  The blend applies to eo;  ea keeps its physical value ( an
+        //  Ohmic - flavored damper ).   Blended after the physical eta
         //  below ( wedg_x is carried there ).
         f_t wedg_x ( -1 );
         if( wedge_R > 0 )
@@ -435,10 +415,8 @@ struct disk_eta_t
         //  cap the ADDED eta at 0. 25 dx_min^2 / eta_dt so the
         //  explicit / STS cap stays ~ eta_dt at every cell --
         //  coarse cells keep the full eta,  the fine - theta
-        //  cells near r_in get it scaled down ( run11 t ~ 3
-        //  collapse:  ring eta 0. 3 on dx_theta 1. 4e-3 gave
-        //  dt_dif 1. 6e-6 ).   The PHYSICAL eta above is not
-        //  touched ( it owns its own WBG19 cap ).
+        //  cells near r_in get it scaled down.   The PHYSICAL
+        //  eta above is not touched ( it owns its own WBG19 cap ).
         if( eta_dt > 0 && ring_e > 0 )
         {
             f_t dx( b_d.geo.dx_cfl( 0, i ) );
@@ -566,22 +544,18 @@ struct disk_eta_t
                    - eo_cgs;
         eo_cgs = __max1( eo_cgs, f_t( 1e-32 ) );
         ea_cgs = __max1( ea_cgs, f_t( 1e-32 ) );
-        //  ADMISSIBILITY AT THE SOURCE  ( 2026 - 10 - 26 ):  the chemistry -
-        //  derived eta is bounded HERE,  before the numerical additions:
-        //    eta_cap          :  the scalar physical ceiling ( WBG19 ... ),
-        //    eta_c * dx       :  CAUSAL -- the diffusive speed across one
-        //                       cell must not exceed c  ( unit - converted
-        //                       through  c t0 / l0 ),
-        //    eta_cap_ref dx^2/dt_0 :  PARABOLIC -- pn = eta dt/dx^2 bounded
-        //                       by eta_cap_ref at the FULL step  ( code units ).
+        //  ADMISSIBILITY AT THE SOURCE:  the chemistry - derived eta is
+        //  bounded HERE,  before the numerical additions:
+        //    eta_cap              :  the scalar physical ceiling ( WBG19 ),
+        //    eta_c * dx           :  CAUSAL -- the diffusive speed across one
+        //                           cell must not exceed c  ( unit - converted
+        //                           through  c t0 / l0 ),
+        //    eta_cap_ref dx^2/dt_0:  PARABOLIC -- pn = eta dt/dx^2 bounded
+        //                           by eta_cap_ref at the FULL step ( code units ).
         //  The extent is the SMALLEST of the three ARC lengths
         //      dr,   r dtheta,   r sin( theta ) dphi
-        //  ( measured 2026-10-26 with the DBG_ETA_DX probe,  cells (0,2) and
-        //  (32,256):  dx_cfl( theta ) IS the arc length r dtheta -- ratio
-        //  0.835 / 1.0000 -- and dx_cfl( phi ) IS r sin(theta) dphi -- 0.987;
-        //  dx_cfl( r ) is the exact spacing ).  So the per - direction
-        //  dx_cfl minimum below is that rule;  it is even slightly tighter
-        //  than the analytic form near the axis.
+        //  ( dx_cfl gives the exact spacing in r and the arc length in
+        //  theta / phi,  slightly tighter than the analytic form near the axis ).
         f_t dx_e( b_d.geo.dx_cfl( 0, i ) );
         for( int a = 1; a < b_d.geo.n_dim; ++ a )
             dx_e = __min1( dx_e, b_d.geo.dx_cfl( a, i ) );
@@ -611,9 +585,7 @@ struct disk_eta_t
         // applying the same dx - adaptive limit ON TOP of the
         // cap sacrifices only diffusion accuracy that is
         // already lost there,  keeping the parabolic dt ~
-        // eta_dt at the fine cells ( run11 / probe4 residual
-        // collapse:  eta_A at cap on lat ~ 10 deg,  dx_theta
-        // 3. 7e-3 -> dt_dif 3. 8e-6 ).   Eta BELOW the cap is
+        // eta_dt at the fine cells.   Eta BELOW the cap is
         // untouched.
         if( eta_dt > 0 )
         {
@@ -632,12 +604,10 @@ struct disk_eta_t
         //  ea -> ea*(1-x).   Applied AFTER the physical eta ( and
         //  its cap )  so eta_phys is the true current value;
         //  the ring / funnel ADD parts ride inside eo.
-        //  ea 's fade ( the user 's 2026 - 10 - 15 refinement ):
-        //  the ambipolar term is ANISOTROPIC ( eta_A acts on
-        //  J_perp only )  and at high contrast it breaks the
-        //  implicit operator 's conditioning ( the run13
-        //  var - eta nonconvergence history );  fading ea to
-        //  zero inside the wedge leaves a purely OHMIC
+        //  ea fades because the ambipolar term is ANISOTROPIC
+        //  ( eta_A acts on J_perp only )  and at high contrast
+        //  it breaks the implicit operator 's conditioning;
+        //  fading it inside the wedge leaves a purely OHMIC
         //  damper -- isotropic,  well - conditioned -- while
         //  eo transitions to eta_damp.
         if( wedg_x > 0 )
@@ -650,10 +620,6 @@ struct disk_eta_t
                 //  only )  -- it preserves the field along
                 //  B,  which is exactly the winding - damping
                 //  profile we want,  IF the operator holds.
-                //  ( The run13 matrix:  fade - ea helped the
-                //  operator but removed the physical
-                //  ambipolar stabilization;  this variant
-                //  tests the opposite trade. )
             {
                 eo *= f_t( 1 ) - wedg_x;
                 ea = wedge_eta * wedg_x
@@ -669,11 +635,10 @@ struct disk_eta_t
         //  The TOTAL parabolic cap ( [nonideal] eta_cap_dt ):
         //  bound the FINAL eo / ea -- wedge blend included -- by
         //  0. 25 dx_min^2 / eta_cap_dt,  i.e. a parabolic number of
-        //  0. 25 at every cell.  This is the per-cell coefficient
-        //  limit of STATUS.md sec. 3bis  ( the wedge puts one
-        //  eta = 0. 3 on cells spanning 50x in size;  the fine polar
-        //  cells then drive the implicit operator far out of the
-        //  range the coarse levels can represent ).
+        //  0. 25 at every cell.  The wedge can put one eta on cells
+        //  spanning 50x in size;  the fine polar cells would then
+        //  drive the implicit operator beyond the range the coarse
+        //  levels can represent.
         if( eta_cap_dt > 0 )
         {
             f_t dx( b_d.geo.dx_cfl( 0, i ) );
@@ -700,7 +665,7 @@ namespace interm
 ////////////////////////////////////////////////////////////
 //  The explicit - sweep flavor:  inert when the implicit
 //  mg_cc module owns the chemistry diffusivity ( the
-//  double - diffusion guard,  design.md sec. 4 ).
+//  double - diffusion guard ).
 
 struct disk_eta_ni_t : disk_eta_t
 {
@@ -714,10 +679,8 @@ struct disk_eta_ni_t : disk_eta_t
         //  mg_cc_t = mg_cc_diffusion_t< prx_cc_t, disk_eta_t >
         //  and keeps the ring / funnel ADDITIONS --  those are
         //  the inner - region B_phi winding damper and MUST
-        //  stay inside the implicit operator;  the run13 bc0
-        //  probe lost them via an over - broad guard and wound
-        //  B_phi x1e33 in 0. 02 yr ).   The EXPLICIT sweep
-        //  itself is killed in ni_t::init ( mg_cc_eta_var ).
+        //  stay inside the implicit operator ).   The EXPLICIT
+        //  sweep itself is killed in ni_t::init ( mg_cc_eta_var ).
         if( args.get< int >( "nonideal", "mg_cc_eta_var",
                              0 ) )
             on = false;

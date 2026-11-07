@@ -1,15 +1,13 @@
 #pragma once
 //
 //  edge_mg_op.h -- the ASSEMBLED operators of a hierarchy,  built
-//  from per-cell blocks for the one purpose that still wants them:
-//  checking the matrix-free operator against an independently
-//  assembled one ( the G-AGG invariant in the P5 gates ).
+//  from per-cell blocks so that the matrix-free operator can be
+//  checked against an independently assembled one.
 //
 //  Nothing in the production step solves with these;  method 5 only
-//  ever applies `A_l` through the device blocks.  This is the same
-//  arithmetic `mg_t::setup` used to do for the host V-cycle,  minus
-//  the auxiliary spaces,  the site blocks and the coarsest
-//  factorisation.
+//  ever applies `A_l` through the device blocks.  This is the plain
+//  Galerkin arithmetic,  without the auxiliary spaces,  the site
+//  blocks or a coarsest factorisation.
 
 #include <vector>
 

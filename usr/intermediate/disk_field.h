@@ -7,11 +7,10 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  The poloidal magnetic field ( design.md sec. 2.1,  T9 ):
-//  the Zanni et al. 2007 bending configuration,  ported from
-//  the WBG19 Athena++ pgen ( set_Bp.cpp )  but applied at
-//  t = 0 ( the t_mag_on machinery is NOT carried over --  the
-//  user's 2026-10-14 direction ).
+//  The poloidal magnetic field:  the Zanni et al. 2007 bending
+//  configuration,  ported from the WBG19 Athena++ pgen
+//  ( set_Bp.cpp )  but applied at t = 0 ( t_mag_on is NOT
+//  carried over ).
 //
 //  A_phi( R, th ) = A0 ( R / r0 )^{ 1 - ( alpha + qT ) / 2 }
 //                   * ( 1 + 1 / ( tan th * mu )^2 )^{ -5/8 },

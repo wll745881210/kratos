@@ -18,11 +18,8 @@
 //
 //      eta( x ) = eta_c + ( grad eta )_c . ( x - x_c )
 //
-//  and a single tensor per cell is only FIRST order, for
-//  any
-//  spatially varying eta, through two independent
-//  mechanisms
-//  ( HANDOVER-ETA-SUBCELL.md section 1 ):
+//  and a single tensor per cell is only FIRST order, for any
+//  spatially varying eta, through two independent mechanisms:
 //
 //    (1) K  drops to first order,  because curl phi_e flips
 //  sign across the six face patches of a cell, so the
@@ -34,9 +31,8 @@
 //  The gradient is NOT stored: the caller keeps 6 numbers a
 //  cell and derives 18 here,  from a neighbour stencil.
 //
-//  THE FIVE THINGS THIS FILE ENCODES ( each was a measured
-//  bug
-//  on the Python side, HANDOVER-ETA-SUBCELL.md section 3 ):
+//  THE FIVE THINGS THIS FILE ENCODES ( each is a trap that
+//  costs accuracy or reads the wrong node ):
 //
 //  * the cell centre is the MU midpoint of the theta cell,
 //  theta_c = arccos( ( cos th_lo + cos th_hi ) / 2 ), NOT
@@ -64,8 +60,8 @@
 //  The GATHER ( which three lattice values to mix ) is the
 //  caller's: on the host it is a std::vector, in a kernel
 //  it
-//  is a strided read. The STENCIL -- the part the five bugs
-//  live in -- is here,  once.
+//  is a strided read. The STENCIL -- where all five traps
+//  live -- is here,  once.
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -156,18 +152,12 @@ __host__ void eta_grad_lat
 //  is assemble_cell's p_deta:  gr[ ic * 18 + a * 6 + q ].
 //
 //  This is NOT bit-identical to the host path: the device
-//  compiler may
-//  contract the rotation's sum with FMA. The gate therefore
-//  compares the
-//  two to a tolerance ( 1e-13 relative ), not bitwise --
-//  the stencil
-//  weights themselves are the same expressions in the same
-//  order.
-//  STATIC: a header-defined __global__ that two TUs include
-//  is emitted once
-//  per TU and nvlink refuses the second definition ( trap
-//  11 of
-//  HANDOVER-ETA-CPP-DEBUG.md, which cost a rebuild here too
-//  ).
+//  compiler may contract the rotation's sum with FMA. The two
+//  are therefore compared to a tolerance ( 1e-13 relative ),
+//  not bitwise -- the stencil weights themselves are the same
+//  expressions in the same order.
+//  STATIC: a header-defined __global__ that two TUs include is
+//  emitted once per TU and nvlink refuses the second
+//  definition.
 
 };  // namespace edge_mg

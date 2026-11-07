@@ -10,9 +10,10 @@ namespace rad::fld
 // stencil.   Only  weight( )  is overridden  ( n_fld = 1 );
 // the base smooth / residual / defect / coarsen kernels
 // pick it up automatically.
-//  Stencil algebra, boundary closure, and the curvilinear
-// metric factors:  docs/radiative_transfer/fld-method.md
-// § 2.
+//  The stencil is flux - form:  the curvilinear metric
+// factors  ( g_a,  c_a )  fold into the face weights and
+// the boundary rows close through the face flux,  so the
+// row sum telescopes to  1 + sig  ( see  w_side ).
 
 struct fld_operation_t
     : multigrid::operation::operation_t< fld_operation_t >
@@ -60,11 +61,10 @@ struct fld_operation_t
     //  Two - cell face mean of the frozen  co_arr[ 0 ]
     // ( the mirror of the nonideal  r_pair_face;  single -
     // block:  periodic wrap,  no interface masks ).
-    //  The neighbour index along  ( a, k ):  the ghost
-    // slot when out of range  (  SMR / periodic ghost
+    //  The neighbour index along  ( a, k ):  the ghost slot
+    // when out of range  ( the SMR / periodic ghosts are
     // filled by the driver's  fill_co_ghost  /  the MG
-    // comms;  the wrap of the single - block stage is
-    // gone ).
+    // comms,  so no separate single - block wrap is needed ).
     template< class idx_T >
     __device__ __forceinline__
     static int idx_nb
@@ -87,16 +87,13 @@ struct fld_operation_t
     ( const bdt_T & bdt, const idx_T & i,
       const int & a, const int & k ) const
     {
-        //  The FACE coefficient at a  D / sig  jump (
-        // tau_cell >> 1 across the disk / corona edge ):
-        // the  arithmetic  mean  over - conducts  (  the
-        // corona's  huge  D  dominates  and  short -
-        // circuits  the  rim  to  the  boundary  --  the
-        // 2026 - 10 - 14  convergence  audit ).   The
-        // HARMONIC  mean  is  the  correct  series -
-        // resistor  flux  (  D_face = 2 D_i D_j / ( D_i
-        // + D_j )  --  the  flux  is  bottlenecked  by
-        // the  opaque  side,  as  the  physics  demands ).
+        //  The FACE coefficient at a  D / sig  jump  ( the
+        // disk / corona edge ):  the HARMONIC mean is the
+        // series - resistor flux,  bottlenecked by the opaque
+        // side  ( D_face = 2 D_i D_j / ( D_i + D_j ) ).
+        // The arithmetic mean over - conducts:  the corona's
+        // huge D dominates and short - circuits the rim to the
+        // boundary.
         const int n( bdt.geo.n_ceff[ a ] );
         if( m1_on )
         {
@@ -130,8 +127,10 @@ struct fld_operation_t
         return bdt.co_arr.at( i )[ 1 ];
     };
 
-    //  Curvilinear metric  ( g_a,  c_a )  of one axis.
-    //  The table and its derivation:  fld - method.md § 2.
+    //  Curvilinear metric coefficients  ( g_a,  c_a )  of
+    // one axis:  the face - weight pair below folds them in,
+    // giving the metric - correct div D grad on cylindrical
+    // and spherical grids  ( 1 / 0 in Cartesian ).
     template< class f_T, class bdt_T, class idx_T >
     __device__ __forceinline__ void metric
     ( f_T & g_a, f_T & c_a, const bdt_T & bdt,
@@ -184,9 +183,9 @@ struct fld_operation_t
         return;
     };
 
-    //  One ( axis, side )  stencil entry  ( the boundary
-    // sides close through the given face flux -- the row
-    // sum telescopes to  1 + sig;  fld - method.md § 2 ).
+    //  One ( axis, side ) stencil entry.   The boundary
+    // sides close through the given face flux,  so the row
+    // sum telescopes to  1 + sig.
     template< class f_T, class bdt_T, class idx_T >
     __device__ __forceinline__ void w_side
     ( f_T & w_c, f_T & w_ak, const f_T & wa,
@@ -199,59 +198,40 @@ struct fld_operation_t
             : f_T( this->d_unif ) );
         if( bnd )
         {
-            //  Vacuum  (  E_g = 0 )  coupling  (  the
-            // lte_elim equilibrium needs OPEN physical
-            // boundaries --  the flux escapes at the
-            //  D E / dx  rate;   closed  ( w = 0 )
-            // boundaries leave no sink ).   The  r_in
-            // face  ( a=0, k=0 )  stays  CLOSED  in  the
-            // disk  theta  range  --  it cuts the  dense
-            // interior  (  an  unphysical  drain );
-            // vacuum there only above  /  below the disk
-            // ... keep it simple:  closed r_in entirely
-            // ( the bench's star heating is volumetric,
-            // no inflow needed ):
+            //  Vacuum  (  E_g = 0 )  coupling.  The lte_elim
+            // equilibrium needs OPEN physical boundaries:  the
+            // flux escapes at the  D E / dx  rate,  while closed
+            // ( w = 0 )  boundaries leave no sink.   The r_in
+            // face  ( a = 0,  k = 0 )  stays CLOSED in the disk
+            // theta range:  it would cut into the dense
+            // interior,  and the star heating is volumetric,
+            // so no inflow is needed.
             w_ak = f_T( 0 );
             if( vac_bnd )
             {
-                //  The Marshak outflow  (  free - streaming
-                // escape ):   F_out = c E / 4  --  NOT  the
-                // diffusive  D E / dx  (  the  rim - wall
-                // audit  2026 - 10 - 14:  the  opaque  rim
-                // cells'  diffusion  throttle  undercounts
-                // the boundary escape by  tau_cell ~ 6800 ).
-                //  NOTE:   wa  is  ZERO  at  physical  faces
-                // (  wa_axis  zeroes  it )  --  the  Marshak
-                // rate  is  c / 4  per  cell  --  face  area
-                // --  the  cell  volume  ratio  in  the
-                // operator's  units:  c_free4 / dx  where
-                // dx  is  the  cell  size  along  the  axis ):
-                //  The  TAU - ADAPTIVE  gate  (  2026 - 10 - 15
-                // § 3.20  fix  ( 2a ) ):  the  Marshak  rate
-                // is  the  FREE - STREAMING  escape  --  it  is
-                // self - consistent  ONLY  for  optically
-                // thin  boundary  cells.   A  THICK  cell
-                // (  tau_cell  >  1 )  is  fed  by  the
-                // throttled  interior  diffusion  flux;   the
-                // c E / 4  outflow  overshoots  it  by  ~tau
-                // and  SUCKS  the  cell  dry  (  the  r_out
-                // midplane  6 . 5 K  vs  47 K  interior  --
-                // only  the  midplane  columns  (  thick )
-                // collapsed,  the  polar  cells  stayed
-                // physical ).   Thick  cells  fall  back  to
-                // the  zero - gradient  closure  (  the
-                // outflow  matches  the  interior  diffusive
-                // supply  --  w  =  0  boundary,   the  E
-                // profile  continues  smoothly  out ):
-                //  tau_cell  from  the  frozen  co_arr  in  the
-                // ROW 's  OWN  units:   the  sig  slot  [ 1 ]
-                // ( c  kappa  rho  dt  --  the  absorption
-                // rate  of  the  row )  vs  the  Marshak
-                // escape  rate  (  c_free4 / dxc  --  both
-                // add  into  the  same  w_c ).   sig  >
-                // escape  <=>  the  photon  is  absorbed
-                // within  the  cell  before  it  reaches  the
-                // free - streaming  boundary  <=>  thick :
+                //  The Marshak outflow  ( free - streaming
+                // escape ):  F_out = c E / 4,  NOT the diffusive
+                // D E / dx.   A diffusive outflow would undercount
+                // a thick cell's escape by ~tau_cell.   wa is
+                // ZERO at physical faces,  so the rate enters as
+                // c_free4 / dx  ( the face - area / cell - volume
+                // ratio in these units ).
+                //  The TAU - ADAPTIVE gate:  c E / 4 is the free -
+                // streaming escape and is self - consistent ONLY
+                // for optically thin cells.   A THICK cell
+                // ( tau_cell > 1 )  is fed by the throttled
+                // interior diffusion flux,  and the  c E / 4
+                // outflow overshoots that supply by ~tau and
+                // drains the cell,  so a thick cell falls back to
+                // the zero - gradient closure  ( w = 0;  the
+                // outflow then matches the diffusive supply and
+                // the E profile continues smoothly out ).
+                //  tau_cell is the row's OWN absorption rate
+                // ( the sig slot:  c kappa rho dt )  over the
+                // Marshak escape rate  c_free4 / dxc  ( both add
+                // into the same w_c ):  sig > escape means the
+                // photon is absorbed within the cell before it
+                // reaches the free - streaming boundary.
                 const auto & geo( bdt.geo );
                 const auto dxc( geo.x_cc( a, 1 )
                     - geo.x_cc( a, 0 ) );
@@ -261,15 +241,13 @@ struct fld_operation_t
                       : f_T( this->s_unif ) );
                 const auto esc
                     ( this->c_free4 / dxc );
-                //  OUTFLOW  faces  only  (  2026 - 10 - 16
-                // § 3.20:  the  r_in  face  ( a = 0,  k = 0 )
-                // must  KEEP  its  Marshak  drain  even  when
-                // thick  --  it  is  the  rim 's  escape
-                // channel  into  the  cavity  (  blocking  it
-                // with  the  gate  piled  the  rim  energy  to
-                // 5763 K  in  the  pb9fl  audit );   the  inflow
-                // side's  injection  is  the  rim_inflow
-                // source's  own  Marshak - pair  closure ):
+                //  OUTFLOW faces only.   The r_in face
+                // ( a = 0,  k = 0 )  must KEEP its Marshak drain
+                // even when thick:  it is the rim's escape
+                // channel into the cavity,  and blocking it piles
+                // the rim energy up.   The inflow side's
+                // injection is the rim_inflow source's own
+                // Marshak - pair closure.
                 const bool out_face
                     ( k == 1 || a != 0 );
                 if( ! out_face || sig_t < esc )
@@ -309,14 +287,12 @@ struct fld_operation_t
         // point of the implicit method --  the  frozen -
         // E  Picard  degeneration  of  the  lagged  form
         // never arises ):
-        //  sig_elim is LOCAL:  the diagonal drops only
-        // where LTE holds  (  sig  above  elim_sig  --
-        // the dust - bearing disk interior;   the  disk
-        // exterior / corona KEEPS its  absorption  (  it
-        // is what bounds the  IR  conductivity  there;
-        // dropping it there turns the corona into a
-        // boundary - to - boundary  shortcut  pipe  (  the
-        // 2026 - 10 - 14 audit ) ):
+        //  sig_elim is LOCAL:  the diagonal drops only where
+        // LTE holds  ( sig above elim_sig -- the dust - bearing
+        // disk interior ).   The disk exterior / corona KEEPS
+        // its absorption:  it is what bounds the IR
+        // conductivity there,  and dropping it turns the
+        // corona into a boundary - to - boundary shortcut pipe.
         const f_T sig_i
             ( var_coef ? f_T( this->sig_i( bdt, i ) )
                        : f_T( this->s_unif ) );

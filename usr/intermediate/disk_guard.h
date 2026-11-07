@@ -7,17 +7,15 @@
 namespace interm
 {
 ////////////////////////////////////////////////////////////
-//  The non - finite guard.  scratch/ppd_tst/handover/
-//  ppd-polar-ic-2026-10-18.md ( sec. 11 ):  a cell gone
-//  NaN / Inf must dump the state and stop,  not sail on
-//  ( the pc5 failure mode:  dt doubled every cycle while
-//  the whole field vacuumed to 1e-21,  so the dt_collapse
-//  fuse never fired ).   Enrolled as the LAST module of
-//  the step order,  parasitic on the evolution module:
-//  the sweep reads the very state the next dt is taken
-//  from.  On a hit every rank prints its first bad cell,
-//  then all ranks throw together --  cycle.cpp's catch
-//  then dumps ( final_output ) and exits,  so the .bin
+//  The non - finite guard.  A cell gone NaN / Inf must dump
+//  the state and stop,  not sail on:  in the failure that
+//  motivated it dt doubled every cycle while the whole field
+//  vacuumed to 1e-21,  so the dt_collapse fuse never fired.
+//  Enrolled as the LAST module of the step order,  parasitic
+//  on the evolution module:  the sweep reads the very state
+//  the next dt is taken from.  On a hit every rank prints its
+//  first bad cell,  then all ranks throw together --  cycle.cpp's
+//  catch then dumps ( final_output ) and exits,  so the .bin
 //  is the crash forensics.
 
 template< class T, class = void >

@@ -56,18 +56,15 @@ struct blk_assemble_t
     geo_T        g;
     cplx_t       c;
     //  ONE tensor for the whole block. Used when p_eta is
-    //  null, so every
-    //  existing caller is BIT-IDENTICAL.
+    //  null, i.e. on the constant-tensor path.
     float2_t   eta[ 6 ];
     //  THE PRODUCTION FORM: one tensor a cell ( 6 numbers
     //  ), optionally
     //  with its sub-cell gradient ( 18 ) and the expansion
     //  centre ( 3 ).
-    //  When p_eta is given it WINS over eta[ 6 ]. This is
-    //  the piece the
-    //  implicit step needs and the gates did not: a
-    //  spatially varying
-    //  eta cannot be expressed by a block constant.
+    //  When p_eta is given it WINS over eta[ 6 ]. The
+    //  implicit step needs this: a spatially varying eta
+    //  cannot be expressed by a block constant.
     const float2_t * p_eta  { nullptr };
     const float2_t * p_deta { nullptr };
     const float2_t * p_xc   { nullptr };
@@ -124,19 +121,13 @@ struct blk_assemble_t
 ////////////////////////////////////////////////////////////
 //  The RHS map   r = M12 b   ( edges <- faces )
 //
-//  This one differs from the assembly kernel in a way that
-//  matters: its
-//  writes ACCUMULATE, and several cells write the same
-//  edge. On the
+//  This one differs from the assembly kernel:  its writes
+//  ACCUMULATE, and several cells write the same edge. On the
 //  device that is a race unless it is an atomic add, and in
-//  float_t
-//  precision atomicAdd needs sm_60+ ( HIP-CPU emulates it
-//  serially ).
-//  The host version needs no such thing, which is exactly
-//  why the two
-//  must be compared with a TOLERANCE and not byte for byte:
-//  the ORDER of
-//  a floating-point sum is not fixed on a device.
+//  float_t precision atomicAdd needs sm_60+ ( HIP-CPU emulates
+//  it serially ).  The device sum order is not fixed,  so a
+//  comparison with the host must use a TOLERANCE, not byte
+//  equality.
 struct rhs_m12_t
 {
     cplx_t               c;
@@ -253,32 +244,30 @@ struct matvec_t_t
 
 
 ////////////////////////////////////////////////////////////
-//  P5's K3:  the MATRIX-FREE operator,  applied cell by cell.
+//  The MATRIX-FREE operator,  applied cell by cell.
 //
 //      y = A x,      A = M1 + dt K
 //
-//  `_cells_dev` already leaves the 12x12 blocks on the
-//  device ( cell_blk_t,  400 floats a cell ),  so the
-//  operator can be applied as three local passes per cell --
-//  gather the twelve edge values,  multiply the block,
-//  scatter the twelve results -- with NO global matrix in
-//  between.  That is what replaces `Sl[ l ]`
-//  ( assemble_m1k_a + csr_t ) in P5,  and it is what makes
-//  the `nc x 1600 B` read-back disappear.
+//  `_cells_dev` already leaves the 12x12 blocks on the device
+//  ( cell_blk_t,  400 floats a cell ),  so the operator can be
+//  applied as three local passes per cell -- gather the twelve
+//  edge values,  multiply the block,  scatter the twelve
+//  results -- with NO global matrix in between.  That is what
+//  makes the `nc x 1600 B` read-back disappear.
 //
-//  The numbering is the one the assembled operator used:
+//  The numbering is the one the assembled operator uses:
 //  `comp[ e ]` is the compact index of edge e,  or -1 when
-//  `keep[ e ] == 0` ( a dropped dof,  kept out of the
-//  system entirely -- M56:  the right-hand side is dropped
-//  with it ).  A block entry that meets a dropped edge
-//  contributes 0,  so the dropped row reads a = f + l only on
-//  the assembled path;  here it is simply absent.
+//  `keep[ e ] == 0` ( a dropped dof,  kept out of the system
+//  entirely -- the right-hand side is dropped with it ).  A
+//  block entry that meets a dropped edge contributes 0,  so
+//  the dropped row reads a = f + l only on the assembled path;
+//  here it is simply absent.
 //
 //  The scatter ACCUMULATES ( a global edge belongs to up to
-//  four cells ),  so it is an atomic add.  That is also why
-//  the gate compares this against the CSR matvec with a
-//  TOLERANCE and not byte for byte:  the order of a
-//  floating-point sum is not fixed on the device.
+//  four cells ),  so it is an atomic add.  That is also why a
+//  comparison against the CSR matvec needs a TOLERANCE and not
+//  byte equality:  the order of a floating-point sum is not
+//  fixed on the device.
 
 struct mf_edge_t
 {
@@ -328,27 +317,26 @@ struct mf_edge_t
 
 
 ////////////////////////////////////////////////////////////
-//  P5's K4:  the PER-CELL block solve,  the smoother of a
-//  matrix-free V-cycle.
+//  The PER-CELL block solve,  the smoother of a matrix-free
+//  V-cycle.
 //
 //  One thread per cell:  factor the 12x12 block
 //  `A_c = m1 + dt k` ( SPD:  M1 is a mass matrix,  K is a
 //  weighted curl-curl ),  then apply `A_c^-1` to the twelve
 //  values the cell gathers from the compact vector -- the
-//  gather/scatter rule is K3's,  so this is one block-Jacobi
-//  sweep with NO global matrix and NO global inverse.
+//  gather/scatter rule of the matrix-free operator,  so this
+//  is one block-Jacobi sweep with NO global matrix and NO
+//  global inverse.
 //
 //  It is a DIAGONAL-BLOCK preconditioner of the compacted
 //  operator,  not the exact diagonal of it:  a live edge is
 //  shared by up to four cells,  so its assembled diagonal is
-//  a sum of contributions.  That is the standard block
-//  Jacobi,  and it is what the host `dinv` path does in the
-//  assembled world.
+//  a sum of contributions.  That is the standard block Jacobi.
 //
 //  Cholesky ( not LU ) on purpose:  the block is SPD by
 //  construction,  and it is the same factorisation the host
-//  reference runs,  so the gate can compare numbers instead
-//  of algorithms.
+//  reference runs,  so the two can be compared number for
+//  number.
 
 struct blk_solve_t
 {

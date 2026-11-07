@@ -22,7 +22,7 @@
 #include "kernels/ni_mg_kernels.h"
 
 ////////////////////////////////////////////////////////////
-//  P5's device-resident,  MATRIX-FREE multigrid ( ee_method
+//  The device-resident,  MATRIX-FREE multigrid ( ee_method
 //  = 5 ).
 //
 //  The operator is
@@ -55,24 +55,18 @@
 //  What is NOT here:  the auxiliary ( HX node space,  face
 //  space ) smoothers of the assembled path.  The smoother is
 //  a per-cell block Jacobi,  which is the device-friendly
-//  form of the same operator family;  whether it is enough
-//  is decided by a gate,  not by taste.
+//  form of the same operator family.
 //
-//  Two invariants this file relies on,  both to be gated:
+//  Two invariants this file relies on:
 //
 //    (1) the aggregation plan is derived from the P CSR that
 //        the host built,  not from a second reading of the
-//        prolongation weights  ( M74:  the weights were
-//        wrong once,  and a re-derivation would repeat the
-//        mistake silently );
+//        prolongation weights -- a re-derivation would repeat
+//        any weight mistake silently;
 //    (2) every coarse column of a fine cell's P rows must
 //        belong to the twelve local edges of that cell's
 //        parent -- otherwise the block structure is broken
 //        and build() throws instead of answering wrongly.
-//
-//  References:  docs/mhd/nonideal/stage-method-map.md 2.6
-//  ( the matrix-free ruling ) and 3 ( the step),  and
-//  ni-refactor-handover.md 5 ( K1..K8 ).
 
 namespace mhd_ee::ni::edge_mg
 {
@@ -142,9 +136,8 @@ struct mf_lvl_t
 //  `B_C = sum over the children c of  W_c^T A_c W_c`.  The
 //  loop order is fixed by the cell / edge numbering,  not by
 //  the thread scheduler:  no atomics,  a private accumulator,
-//  one store.  The gate compares it against the host Galerkin
-//  product,  so a difference can only be the floating-point
-//  summation order ( A4.29 already accepted 2.4e-16 ).
+//  one store.  Compared with the host Galerkin product,  a
+//  difference can only be the floating-point summation order.
 struct blk_agg_t
 {
     cplx_t                  cc;
@@ -228,12 +221,11 @@ struct blk_agg_t
 ////////////////////////////////////////////////////////////
 //  The DIAGONAL of a level,  accumulated from its cells.
 //
-//  `proto-mg` measured that a per-cell 12x12 block is NOT a
-//  smoother here ( lam_max( S A ) grows like h^-2: 65 at
-//  13.8k edges, 304 at 104k ) while the diagonal Jacobi has a
-//  mesh-independent lam_max( D^-1 A ) of 3.7--3.97.  So the
-//  smoothing is a DAMPED diagonal Jacobi and this kernel is
-//  its only setup:  d[ comp[e] ] = sum over the cells that
+//  A per-cell 12x12 block is NOT a smoother here:
+//  lam_max( S A ) grows like h^-2,  while the diagonal Jacobi
+//  has a mesh-independent lam_max( D^-1 A ) of about 3.8.  So
+//  the smoothing is a DAMPED diagonal Jacobi and this kernel
+//  is its only setup:  d[ comp[e] ] = sum over the cells that
 //  hold e of A_c[ e ][ e ],  which is exactly the CSR
 //  diagonal of the assembled operator.
 struct blk_diag_t
@@ -286,20 +278,19 @@ struct blk_diag_t
 ////////////////////////////////////////////////////////////
 //  The scalars of an iteration,  on the device.
 //
-//  `pcg_dev_t` finished every dot on the host and computed
-//  alpha,  beta and the residual there:  about 600 additions
-//  and 40 flops a step.  Against 1e6--1e7 device flops that is
-//  noise,  so these kernels are not a speed change;  they are
-//  what makes the invariant true -- the host DISPATCHES a step
-//  and never computes in it.  The host reads ( res,  ok ) once
+//  Finishing every dot on the host and computing alpha,  beta
+//  and the residual there is a few hundred flops against
+//  1e6--1e7 device flops -- noise for speed,  but it would
+//  break the invariant:  the host DISPATCHES a step and never
+//  computes in it.  The host therefore reads ( res, ok ) once
 //  per iteration,  and `res` is a scalar a step is allowed to
 //  read back.
 //
 //  Every op below runs in ONE thread (`real_one_k`).
 
 //  b2 guard,  alpha,  beta,  res
-//  (`cg_b2s_t`/`cg_alpha_t`/`cg_beta_t`/`cg_res_t`) moved to
-//  `edge_mg_dev_vec.h` when K6 started using them too.
+//  (`cg_b2s_t`/`cg_alpha_t`/`cg_beta_t`/`cg_res_t`) live in
+//  `edge_mg_dev_vec.h`,  shared with the face solve.
 
 struct cg_om_t
 {
@@ -309,8 +300,8 @@ struct cg_om_t
     //  omega = 2 / ( 1.35 lam ):  the highest mode is damped
     //  by | 1 - omega lam | = 0.48,  and the 35% margin keeps
     //  the sweep stable even if lam is under-estimated by a
-    //  tenth.  ( 2 / ( 1.125 lam ) is 1.78 lam and diverges
-    //  once lam is under-estimated by 12% -- dead-ends M82. )
+    //  tenth ( a factor 1.78 lam diverges once lam is
+    //  under-estimated by 12% ).
     __device__ void apply(  ) const
     {
         p_om[ 0 ] = ( * p_lam ) > float_t( 0. )
@@ -324,8 +315,8 @@ struct cg_om_t
 //  The power iteration that estimates lam_max( D^-1 A ),  on
 //  the device.  An ALL-ONES start is ( nearly ) the smoothest
 //  vector there is,  so its iterates never leave the bottom of
-//  the spectrum and lam comes out near lam_min -- which is what
-//  made the 8x16x128 axis mesh diverge ( dead-ends M82 ).
+//  the spectrum and lam comes out near lam_min -- too large a
+//  damping factor,  and the sweep diverges on a long axis.
 //  Alternating has half of its energy in the highest mode.
 
 struct lam_start_t
@@ -398,9 +389,9 @@ struct diag_inv_t
 
 
 ////////////////////////////////////////////////////////////
-//  The matrix-free apply on a DENSE-BLOCK level ( K3's
-//  gather / multiply / scatter,  with the twelve by twelve
-//  block read from `p_ab` instead of the cell block ).
+//  The matrix-free apply on a DENSE-BLOCK level:  gather /
+//  multiply / scatter,  with the twelve by twelve block read
+//  from `p_ab` instead of the cell block.
 struct mf_blk_t
 {
     cplx_t                  c;
@@ -447,7 +438,7 @@ struct mf_blk_t
 
 
 ////////////////////////////////////////////////////////////
-//  The block-Jacobi smoother on a dense-block level:  K4's
+//  The block-Jacobi smoother on a dense-block level:  a
 //  twelve by twelve Cholesky solve,  same gather / scatter
 //  rule,  the block read from `p_ab`.
 struct blk_blk_t
@@ -483,7 +474,7 @@ struct blk_blk_t
                 //  so give them a unit row instead of a zero pivot --
                 //  otherwise the Cholesky returns inf and the whole
                 //  level's preconditioner turns into NaN ( the polar
-                //  axis is where this shows:  see STATUS.md ( 91 ) ).
+                //  axis is where this shows ).
                 L[ r ][ q ] = ( live_r && live_q ) ? ab[ r * 12 + q ]
                                                    : float_t( 0. );
             }
@@ -582,8 +573,8 @@ struct resid_fix_t
 //  This is `reduce_rhs` without the host:  it reads the edge
 //  1-form out of the block's `a` field directly,  so a step
 //  never has to bring `v.a` back to the host to build `a_raw`
-//  ( M56:  a dropped dof takes its right-hand side with it,
-//  and `p_comp < 0` is exactly that ).
+//  ( a dropped dof takes its right-hand side with it,  and
+//  `p_comp < 0` is exactly that ).
 struct gather_a_t
 {
     cplx_t                   c;
@@ -615,7 +606,7 @@ struct gather_a_t
 ////////////////////////////////////////////////////////////
 //  The compact vector -> edge field scatter ( level 0 ),  and
 //  the uncompacted copy the representation bridge eats ( level
-//  0's `x_raw`,  which is what `_represent` took as input ).
+//  0's `x_raw` ).
 struct expand_a_t
 {
     cplx_t                   c;
@@ -688,16 +679,12 @@ struct mf_t
     //  The COARSEST level's nested PCG:  cap and tolerance.
     //  That solve only conditions the V-cycle -- it never
     //  changes the outer answer -- so a tight tolerance buys
-    //  nothing.  Measured on three meshes:  the contraction and
-    //  the outer iteration count are identical for a cap of 1,
-    //  2 and 10,  while a step costs 35 / 36 / 41 ms on 8x16x32,
-    //  57 / 59 / 81 ms on 8x16x128 and 36 / 43 / 59 ms on the
-    //  polar axis ( see STATUS.md ( 90 ) and ( 92 ) ).  2 is the
-    //  shipped default:  one iteration is as good,  so the
-    //  second is left as a margin for meshes whose coarse level
-    //  is less benign.  Both are knobs under [nonideal]
-    //  ( ee_coarse_iter / ee_coarse_tol ) because the right cap
-    //  is a property of the mesh,  not of the method.
+    //  nothing.  A cap of 1 conditions about as well as 2 or 10
+    //  for a fraction of the step;  2 is the shipped default,
+    //  the second iteration left as a margin for meshes whose
+    //  coarse level is less benign.  Both are knobs under
+    //  [nonideal] ( ee_coarse_iter / ee_coarse_tol ) because the
+    //  right cap is a property of the mesh,  not of the method.
     int              coarse_iter { 2 };
     float_t          coarse_tol { float_t( 1e-10 ) };
     //  Diagnostics only ( printed when MF_COARSE_STATS is in

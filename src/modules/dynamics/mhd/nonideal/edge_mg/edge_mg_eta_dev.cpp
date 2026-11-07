@@ -6,9 +6,9 @@
 ////////////////////////////////////////////////////////////
 //  The host half of the eta lattice.
 //
-//  Both entries are one launch and one barrier:  the
-//  device packs eta where eta already is ( K1 ),  and the
-//  sub-cell stretch reuses `eta_centre` from the header.
+//  Both entries are one launch and one barrier:  the device
+//  packs eta where eta already is,  and the sub-cell stretch
+//  reuses `eta_centre` from the header.
 //  Nothing here is device code -- the `__global__` layer
 //  is in kernels/ni_ie_kernels.h and the two `apply`s
 //  stay in the header.

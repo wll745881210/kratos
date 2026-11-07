@@ -16,6 +16,7 @@ Run from any directory; paths are resolved from constants below.
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ import numpy as np  # noqa: E402
 # ----------------------------------------------------------------------
 # frozen data locations
 # ----------------------------------------------------------------------
-SCR = Path("/mnt/scratch/donet_tst/fid")
+SCR = Path(os.environ.get("KRATOS_DONET", "donet_tst/fid"))
 RUNS = SCR / "runs"
 MODELS = SCR / "models"
 ANALYSIS = SCR / "analysis"
@@ -615,7 +616,10 @@ def fig_ensemble():
     jC, jN = idx["C(d)"], idx["N(d)"]
 
     def inv(rd):
-        sys.path.insert(0, "/home/lilew/apps/kratos_donet/visual")
+        sys.path.insert(0, os.environ.get(
+            "KRATOS_VISUAL",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "..", "..", "..", "visual")))
         from binary_io import binary_io  # noqa: E402
 
         f = binary_io(str(samples / rd / "pl_00101.bin"))

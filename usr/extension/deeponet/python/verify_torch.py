@@ -19,6 +19,7 @@ significant digits confirms the native kernels match PyTorch.
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -28,7 +29,10 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, "/home/lilew/apps/kratos_donet/visual")
+sys.path.insert(0, os.environ.get(
+    "KRATOS_VISUAL",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "..", "..", "..", "..", "visual")))
 from binary_io import binary_io  # noqa: E402
 from model import StackedDeepONet  # noqa: E402
 
@@ -67,8 +71,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="prod_full")
     ap.add_argument("--run", default="nn_vfull_hyb")
-    ap.add_argument("--models", default="~/scratch/donet_tst/fid/models")
-    ap.add_argument("--runs", default="~/scratch/donet_tst/fid/runs")
+    ap.add_argument("--models", default=os.path.join(os.environ.get(
+                    "KRATOS_DONET", "donet_tst/fid"), "models"))
+    ap.add_argument("--runs", default=os.path.join(os.environ.get(
+                    "KRATOS_DONET", "donet_tst/fid"), "runs"))
     ap.add_argument("--cells", type=int, nargs="+",
                     default=[0, 16, 32, 48, 64])
     args = ap.parse_args()

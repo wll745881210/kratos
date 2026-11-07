@@ -26,7 +26,9 @@ import argparse, os, re, sys
 import numpy as np
 
 sys.path.insert(0, os.environ.get(
-    'KRATOS_VISUAL', '/home/lilew/apps/kratos_donet/visual'))
+    "KRATOS_VISUAL",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "..", "..", "..", "..", "visual")))
 from binary_io import binary_io
 
 FLOOR = 1e-30

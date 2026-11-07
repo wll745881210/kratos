@@ -93,7 +93,7 @@ __host__ void wb_build
         idx_t nd( 0 );
         c.face_key( f, a, nd );
         //  ---- the canonical owner,  the SAME decomposition
-        //  the assembly and `_face_areas` use ( M66 )
+        //  the assembly uses
         int   s( 0 );
         idx_t i( nd );
         const int na = int( c.n[ a ] );
@@ -102,8 +102,8 @@ __host__ void wb_build
             i[ a ] = na - 1;
             s      = 1;
         }
-        //  M66:  a periodic axis has no high wall -- no face
-        //  of it may be owned from the s = 1 side
+        //  a periodic axis has no high wall -- no face of it
+        //  may be owned from the s = 1 side
         if( s == 1 && c.per[ a ] != 0 )
         {
             ++ n_seam;
@@ -150,7 +150,7 @@ __host__ void wb_build
     {
         throw std::runtime_error
         ( "wb_build: a periodic-axis face is owned from "
-          "the high side ( M66 )" );
+          "the high side" );
     }
     std::sort( slot.begin(  ), slot.end(  ) );
     for( std::size_t q = 1; q < slot.size(  ); ++ q )

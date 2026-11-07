@@ -13,19 +13,17 @@
 #include "kernels/ni_ie_kernels.h"
 
 ////////////////////////////////////////////////////////////
-//  P5 / K6 -- the DEVICE "representation out" of one
-//  implicit edge step:
+//  The DEVICE "representation out" of one implicit edge
+//  step:
 //
 //      rep = M2^-1 M12^T a
 //
-//  The host path (`_assemble_m2` + `_represent` in
-//  edge_mg.cpp) assembles the face mass M2 as a CSR matrix
-//  every step, reads the edge state back and solves with a
-//  host CG. This header replaces the whole chain with three
-//  kernels and a device CG:
+//  Assembling the face mass M2 as a CSR matrix would read the
+//  edge state back to the host and solve there; instead three
+//  kernels and a device CG do the whole chain:
 //
 //    (1) rhs    rep = M12^T a     edge -> face,  atomicAdd,
-//                                 degenerate faces get 0  ( M56 )
+//                                 degenerate faces get 0
 //    (2) matvec y = M2 x          6x6 block gather per cell,
 //                                 skip degenerate rows AND
 //                                 columns, atomicAdd scatter,
@@ -45,11 +43,11 @@
 //
 //  THE TWO RULES THIS FILE MUST NOT BREAK:
 //
-//  * M56 -- a dropped face DOF carries an identity row, so
+//  * a dropped face DOF carries an identity row, so
 //    its right-hand side MUST be zero, or the row reads
 //    `a = 0 + rhs`. `rep_rhs_op_t` skips the degenerate rows;
 //    nothing else may drive them.
-//  * A4.31 -- the scatter ACCUMULATES ( atomicAdd ) and is
+//  * the scatter ACCUMULATES ( atomicAdd ) and is
 //    normalised afterwards ( `rep_scale_op_t` ). A plain
 //    store would make the preconditioner depend on the thread
 //    order.
@@ -100,12 +98,10 @@ struct rep_dev_t
 ////////////////////////////////////////////////////////////
 //  (1) rhs   r += M12^T a    ( edges -> faces )
 //
-//  Same gathering as `ref_rhs_t` / `rhs_m12_t`,  but the
-//  output is a SCALAR array:  the host path wraps `a` into
-//  float2 and keeps the real part,  so this kernel reads the
-//  real part of the float2 array the caller hands it ( the
-//  convention of `_represent`: `a2[ e ] = float2( a[ e ] )`
-//  ).  Degenerate faces are SKIPPED -- that is M56: the
+//  Same gathering as the other M12^T products,  but the
+//  output is a SCALAR array:  the caller hands in the float2
+//  convention `a2[ e ] = float2( a[ e ] )`,  and only the
+//  real part is read.  Degenerate faces are SKIPPED -- a
 //  dropped DOF owns an identity row,  so its right-hand side
 //  has to be zero,  not "whatever the source scattered into
 //  it".
@@ -150,7 +146,7 @@ struct rep_rhs_op_t
 //  dropped face is decoupled in BOTH directions:  no live row
 //  reads it and its own row receives nothing.  The identity
 //  row is added by the mask kernel below,  in ONE place,  so
-//  the operator has exactly the host `_assemble_m2` action.
+//  the operator has exactly the assembled face-mass action.
 struct rep_mv_op_t
 {
     cplx_t              c;
@@ -193,11 +189,11 @@ struct rep_mv_op_t
 //
 //    y[ f ] = x[ f ]     for a degenerate f
 //
-//  This is the `( f, f, 1 )` triplet of `_assemble_m2`. It is
-//  a separate kernel because it touches the OPERATOR,  not a
-//  cell,  and because a mask applied after the accumulation
-//  is exactly equivalent to the host identity row ( no cell
-//  scatters into a degenerate row ).
+//  This is the `( f, f, 1 )` triplet of the assembled face
+//  mass.  It is a separate kernel because it touches the
+//  OPERATOR,  not a cell,  and because a mask applied after
+//  the accumulation is exactly equivalent to the identity row
+//  ( no cell scatters into a degenerate row ).
 struct rep_mask_op_t
 {
     const int     *  p_deg;
@@ -219,8 +215,8 @@ struct rep_mask_op_t
 //
 //  Per cell:  take the m x m sub-block of `m2` over the LIVE
 //  local faces ( m = 6 unless the cell touches the polar
-//  ring,  where it is 5 -- the SAME skip rule `_assemble_m2`
-//  uses ),  Cholesky,  solve for the gathered residual,  and
+//  ring,  where it is 5 -- the same skip rule the assembled
+//  face mass uses ),  Cholesky,  solve for the gathered residual,  and
 //  accumulate.  m is read at run time from the mask;  the
 //  storage is the fixed 6x6 of `m2`,  which is what makes the
 //  kernel branch-free in its arrays.
@@ -264,8 +260,7 @@ struct rep_blk_op_t
         }
         //  in-place Cholesky,  lower triangle ( SPD:  the
         //  block is a mass matrix ).  A non-positive pivot is
-        //  a bug,  and it surfaces as a NaN in the solution,
-        //  which the gate treats as a FAIL.
+        //  a bug,  and it surfaces as a NaN in the solution.
         for( int a = 0; a < m; ++ a )
         {
             for( int b = 0; b <= a; ++ b )
@@ -304,7 +299,7 @@ struct rep_blk_op_t
         }
         for( int a = 0; a < m; ++ a )
         {
-            //  ACCUMULATE -- see A4.31 in the file comment
+            //  ACCUMULATE -- see the file comment
             atomicAdd( & p_z[ gf[ lf[ a ] ] ], y[ a ] );
         }
         return;
@@ -364,7 +359,7 @@ __host__ void rep_dev_ensure
 ( device::base_t & dev, const cplx_t & c, rep_dev_t & st,
   const int & n_th_lim );
 
-//  (1) rhs = M12^T a,  degenerate faces zero ( M56 )
+//  (1) rhs = M12^T a,  degenerate faces zero
 __host__ void rep_dev_rhs
 ( device::base_t & dev, const cplx_t & c, rep_dev_t & st,
   const cell_blk_t * p_blk, const float2_t * p_a );
@@ -390,16 +385,14 @@ __host__ const float_t * rep_dev_pre
 //  every vector update reads its coefficient from the device.
 //  The host's part of an iteration is ONE 8-float copy ( `res`
 //  for the loop test,  `ok` for the breakdown ) plus the
-//  launches:  it DISPATCHES and does not compute ( H1,  as
-//  STATUS.md ( 90 ) states it ).  `mf_t::pcg` in
+//  launches:  it DISPATCHES and does not compute.  `mf_t::pcg`
+//  in
 //  `edge_mg_mf.h` has the same shape on the same slot layout.
 //
 //  The cold path ( `p_x0 == nullptr` ) starts from x = 0,  r =
-//  b,  which is bit-identical to what `pcg_dev_t` did -- the
-//  gate numbers did not move when this replaced it.  The warm
-//  path copies `p_x0`,  forms A x into `p_r` and flips it into
-//  b - A x,  which saves 2-3 iterations:  the face state of a
-//  step is a good guess for the next one.
+//  b.  The warm path copies `p_x0`,  forms A x into `p_r` and
+//  flips it into b - A x,  which saves a couple of iterations:
+//  the face state of a step is a good guess for the next one.
 struct rep_resid_op_t
 {
     const float_t * p_rhs;
@@ -424,16 +417,16 @@ __host__ rep_solve_stat_t rep_dev_solve
   const float_t * p_x0, const float_t & tol, const int & it_max );
 
 ////////////////////////////////////////////////////////////
-//  THE ENTRY POINT the implicit step calls  ( K6 ):
+//  THE ENTRY POINT the implicit step calls:
 //
 //      rep = M2^-1 M12^T a
 //
-//  `p_a` is the device edge array in the FLOAT2 convention of
-//  `_represent` (`a2[e] = float2(a[e])`;  only the real part
-//  is read),  `p_rep` is `c.n_face` floats on the device,  and
+//  `p_a` is the device edge array in the FLOAT2 convention
+//  (`a2[e] = float2(a[e])`;  only the real part is read),
+//  `p_rep` is `c.n_face` floats on the device,  and
 //  `st` is set up lazily on the first call. `it` / `res` are
-//  the CG statistics ( the RECURSIVE residual,  as
-//  `pcg_dev_t` reports it ).
+//  the CG statistics ( the RECURSIVE residual,  as the
+//  iteration reports it ).
 __host__ void ni_ie_represent_dev
 ( device::base_t & dev, const cplx_t & c,
   const cell_blk_t * p_blk, const float2_t * p_a, rep_dev_t & st,
@@ -445,8 +438,8 @@ __host__ void ni_ie_represent_dev
 //  The RAW variant of the bridge:  `p_a` is indexed by
 //  GLOBAL EDGE id and holds one float_t each.
 //
-//  The float2 entry point mirrors the host `_represent`,
-//  which materialises `a2[e] = float2(a[e])`.  A device step
+//  The float2 entry point takes an edge array in which
+//  `a2[e] = float2(a[e])` has been materialised.  A device step
 //  has no such array and no reason to make one:  `mf_t::expand`
 //  already writes the raw per-edge values (`p_xraw0`),  and the
 //  bridge only ever reads the real part.  So this variant takes

@@ -54,8 +54,7 @@ void disk_emf0_k( const bdt_T b_d, const int supp_nr,
 //  ring_tau / f( r ),  with f = ( ( ring_r - r )
 //  / ( ring_r - r_in ) )^2 ramping smoothly from 0 at
 //  ring_r to 1 at r_in --  NO hard interface ( the frozen
-//  rim 's corner was the dt limiter;  ledger cont. 64 - 65
-//  and the literature notes in usr_ext / ppd / design.md ).
+//  rim 's corner was the dt limiter ).
 //  This kernel relaxes the FACE B_phi toward zero:  a local
 //  scaling of the phi component can not seed monopoles (
 //  it damps the phi part of any existing div error ),  so
@@ -99,12 +98,7 @@ void disk_bphi_rlx_k( const bdt_T b_d, const int slice,
 //  ( [prob] ck15,  default 3 = theta + radial ):  src_geo
 //  replaces the pointwise centrifugal / gravity terms with the
 //  face - exponential forms matched to the equilibrium -
-//  variable pressure reconstruction in plm_ck15.h.   See
-//  usr_ext/ppd/design.md sec. 2.1 and the ledger cont. 31-32.
-//  ( The investigation - era A/B switches -- wb_src,  azm_wb,
-//  rsc_off / rsc_src,  src_sub -- were retired to
-//  backup/ppd/2026-10-13 after being measured inert or
-//  superseded. )
+//  variable pressure reconstruction in plm_ck15.h.
 
 struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
 {
@@ -136,11 +130,8 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
     //  The density floor lives HERE ( the integrator 's
     //  update point ),  composition - preserving:  the species
     //  slots scale with rho so the added mass carries the
-    //  local composition.  ( Was:  the buffer kernel floored
-    //  rho alone --  corrupting the composition at every floor
-    //  cell every step,  the measured disk - surface
-    //  scrambling.  The eos d_floor = 1e-21 stays as the
-    //  primitives ' last - resort positivity. )
+    //  local composition.   The eos d_floor = 1e-21 stays as
+    //  the primitives ' last - resort positivity.
     float_t    rho_fl;
     float_t    fl_r0;
     float_t    fl_idx;
@@ -174,8 +165,7 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
     //  1 = Bai 's buffer style:  relax ONLY the velocities
     //  ( v_r, v_th -> 0;  v_phi -> the profile value ),
     //  leaving rho / p / composition to the physics --  no
-    //  mass / energy injection,  no ring - exterior
-    //  mismatch ( the v_theta circulation of cont. 67 ).
+    //  mass / energy injection,  no ring - exterior mismatch.
     int        ring_mode;
     int        ring_bphi;
     //  [ring] n_th_band:  theta - edge band width in cells;
@@ -189,8 +179,7 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
     //  va_cap_out:  the OUTER annulus inner edge ( 0 =
     //  off ):  x[ 0 ] > va_cap_out joins the cap zone --
     //  the r_out rim - cell B_phi pileup antidote  ( the
-    //  bnd_out anchoring alone leaves the last cell
-    //  winding up,  handover sec. 17 ).
+    //  bnd_out anchoring alone leaves the last cell winding up ).
     float_t    ring_vac;
     int        ring_vac_ring;
     int        ring_vac_nth;
@@ -205,8 +194,8 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
     //  0 = off.
     float_t    tcap_cs2;
     //  The cylindrical - R poloidal - momentum damper ( the
-    //  aggressive companion of [wedge] 's eta;  the user 's
-    //  2026 - 10 - 15 direction ):  inside R = r sin( th ) <
+    //  aggressive companion of [wedge] 's eta ):  inside
+    //  R = r sin( th ) <
     //  wedge_R the poloidal momenta relax to 0 on
     //  wedge_tau,  with the energy following the kinetic
     //  difference exactly ( the mode - 1 ring bookkeeping ),
@@ -475,8 +464,8 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
             // cancel to |vp^2/r - gm/r^2| / (gm/r^2) ~ 3e-3,
             // so a relative density mismatch eps shows up as
             // a net radial force eps * gm/r^2,  amplified
-            // ~300x.  ( Was: u[ idx::rho ],  the post - flux
-            // density. )
+            // ~300x.   Using the post - flux density breaks
+            // the match.
             bool grav_on = true;
             if( ck15 & 2 )
             {
@@ -580,7 +569,7 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
             //  boundary - artifact zone ( chem - skipped via
             //  [chemistry] skip_nt --  with neither heating
             //  nor cooling it would rain onto the corner
-            //  and shock - heat,  cont. 68 ).
+            //  and shock - heat.
             const f_t r_in = geo.x_fc( 0, 0 );
             const f_t s    = ( ring_r - f_t( x[ 0 ] ) )
                            / ( ring_r - r_in );
@@ -690,8 +679,7 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
                 //  cell can hold ene <= ke + emag
                 //  numerically;  scaling a NEGATIVE etk
                 //  pushed ene below ke + emag ->  negative
-                //  pressure ->  the species NaN wave of
-                //  v12b ( ledger cont. 71 ).
+                //  pressure ->  the species NaN wave.
                 const f_t etk = __max1( f_t( u[ idx::ene ] )
                     - m2 * f_t( 0.5 ) / r0c - emag,
                     f_t( 0 ) );
@@ -915,8 +903,7 @@ struct stp_t : dynamics::mhd::integrator::sph_t< stp_t >
     //  B_phi locally shifts the cell div by
     //  - eps * ( phi - part of div )  --  pointwise nonzero
     //  once the field is phi - asymmetric,  so this INJECTS
-    //  div error ( measured 1.3e-2 vs 1e-5 clean,  ledger
-    //  cont. 65 ).   The field side of the ring lives in
+    //  div error.   The field side of the ring lives in
     //  the ring resistivity ( disk_eta_t,  CT diffusion,
     //  exactly div - free ) instead.
     template< class bdt_T >
